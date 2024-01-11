@@ -1,16 +1,19 @@
-use std::time::Duration;
+use ratatui::style::Stylize;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
     let mut terminal = tui::init_terminal()?;
-    let mut model = Model {};
+    let mut model = Model::default();
 
-    loop {
+    while !model.should_quit() {
         terminal.draw(|frame| view(&model, frame))?;
 
-        let event = wait_for_event(Duration::from_millis(16));
+        let event = wait_for_event();
         update(&mut model, event);
+        if model.should_quit() {
+            break;
+        }
         while let Some(next_event) = get_event() {
             update(&mut model, next_event);
         }
@@ -20,23 +23,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn view(model: &Model, frame: &mut ratatui::Frame) {}
+pub fn view(model: &Model, frame: &mut ratatui::Frame) {
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new("Hello")
+            .block(ratatui::widgets::Block::new().white().on_black().bold())
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        frame.size(),
+    );
+}
 
-pub fn wait_for_event(duration: Duration) -> Event {
-    Event::CtrlC
+pub fn wait_for_event() -> Event {
+    let mut event = None;
+    while event.is_none() {
+        // TODO: remove unwrap
+        while !crossterm::event::poll(std::time::Duration::from_secs(10)).unwrap() {
+            // do nothing
+        }
+
+        let crossterm_event = crossterm::event::read().unwrap();
+        event = create_event(crossterm_event);
+    }
+    // SAFETY: safe because while loop existed only when event was Some
+    event.unwrap()
 }
 
 pub fn get_event() -> Option<Event> {
-    None
+    // TODO: remove unwrap
+    if crossterm::event::poll(std::time::Duration::from_secs(0)).unwrap() {
+        // TODO: remove unwrap
+        create_event(crossterm::event::read().unwrap())
+    } else {
+        None
+    }
 }
 
-pub fn update(model: &mut Model, event: Event) {}
+pub fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
+    match crossterm_event {
+        crossterm::event::Event::Key(key) => {
+            if key.kind == crossterm::event::KeyEventKind::Press {
+                match key.code {
+                    crossterm::event::KeyCode::Char('c')
+                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
+                    {
+                        Some(Event::CtrlC)
+                    }
+                    _ => Some(Event::CtrlC),
+                }
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
 
+pub fn update(model: &mut Model, event: Event) {
+    if event == Event::CtrlC {
+        model.app_state = Mode::Quit;
+        return;
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Event {
     CtrlC,
 }
 
-pub struct Model {}
+#[derive(Debug, PartialEq, Default)]
+pub enum Mode {
+    #[default]
+    Idle,
+    Editing(String),
+    CommandFinished,
+    Quit,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub enum HintState {
+    #[default]
+    ShowHints,
+    HideHints,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct Config {
+    hint_state: HintState,
+    command_history: Vec<CompletedCommand>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Output {
+    Success(String),
+    Error(String),
+    #[default]
+    Empty,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct CompletedCommand {
+    input: String,
+    output: Output,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct Model {
+    app_state: Mode,
+    config: Config,
+}
+
+impl Model {
+    pub fn should_quit(&self) -> bool {
+        self.app_state == Mode::Quit
+    }
+}
 
 mod tui {
     use crossterm::{

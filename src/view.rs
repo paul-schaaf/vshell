@@ -338,17 +338,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
     }
 
     let heading = match &model.mode {
-        Mode::Idle | Mode::Quit => {
-            let mut s = String::from("Input");
-            s.push_str(
-                format!(
-                    "-{}",
-                    model.current_command.cursor_position().unwrap_or_default()
-                )
-                .as_str(),
-            );
-            s
-        }
+        Mode::Idle | Mode::Quit => String::from("Input"),
         Mode::Editing(_) => String::from("Input - Editing"),
         Mode::Selecting(number) => format!("Input - Selecting({})", number),
     };

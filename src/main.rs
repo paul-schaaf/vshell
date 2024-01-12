@@ -315,6 +315,19 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::CtrlS => {
                 model.mode = Mode::Selecting(String::new());
             }
+            event::Event::CtrlO => {
+                match model.current_command {
+                    CurrentView::CommandWithoutOutput(_) => {
+                        // do nothing
+                    }
+                    CurrentView::CommandWithOutput(ref command) => {
+                        clipboard.set_text(command.output.as_str()).unwrap();
+                    }
+                    CurrentView::Output(ref command) => {
+                        clipboard.set_text(command.as_str()).unwrap();
+                    }
+                }
+            }
         },
         Mode::Editing(_) => match event {
             event::Event::CtrlC => todo!(),
@@ -330,6 +343,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::CtrlV => todo!(),
             event::Event::CtrlP => todo!(),
             event::Event::CtrlS => todo!(),
+            event::Event::CtrlO => todo!(),
         },
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
         Mode::Quit => unreachable!(),
@@ -399,6 +413,16 @@ pub enum Output {
     Error(String),
     #[default]
     Empty,
+}
+
+impl Output {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Output::Success(output) => output.as_str(),
+            Output::Error(output) => output.as_str(),
+            Output::Empty => "",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]

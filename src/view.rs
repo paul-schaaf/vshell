@@ -39,125 +39,8 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
         left_layout[1],
     );
 
-    match &model.current_command {
-        CurrentView::CommandWithoutOutput(command) => {
-            frame.render_widget(
-                Paragraph::new(command.input.as_str())
-                    .block(Block::new().white().on_black().borders(Borders::ALL))
-                    .wrap(Wrap { trim: false }),
-                left_layout[0],
-            );
-            frame.render_widget(
-                Block::new().white().on_black().borders(Borders::ALL),
-                outer_layout[1],
-            );
-            frame.render_widget(
-                Paragraph::new("Output")
-                    .block(Block::new().white().on_black().bold())
-                    .wrap(Wrap { trim: false }),
-                Rect {
-                    x: outer_layout[1].x,
-                    y: outer_layout[1].y,
-                    width: "Output".len() as u16,
-                    height: 1,
-                },
-            );
-        }
-        CurrentView::Output(output) => match output {
-            Output::Success(output) => {
-                frame.render_widget(
-                    Paragraph::new(output.as_str())
-                        .block(Block::new().white().on_black().borders(Borders::ALL))
-                        .wrap(Wrap { trim: false }),
-                    outer_layout[1],
-                );
-                frame.render_widget(
-                    Paragraph::new("Output")
-                        .block(Block::new().white().on_black().bold())
-                        .wrap(Wrap { trim: false }),
-                    Rect {
-                        x: outer_layout[1].x,
-                        y: outer_layout[1].y,
-                        width: "Output".len() as u16,
-                        height: 1,
-                    },
-                );
-            }
-            Output::Error(output) => {
-                frame.render_widget(
-                    Paragraph::new(output.as_str())
-                        .block(Block::new().red().on_black().borders(Borders::ALL))
-                        .wrap(Wrap { trim: false }),
-                    outer_layout[1],
-                );
-
-                frame.render_widget(
-                    Paragraph::new("Output")
-                        .block(Block::new().red().on_black().bold())
-                        .wrap(Wrap { trim: false }),
-                    Rect {
-                        x: outer_layout[1].x,
-                        y: outer_layout[1].y,
-                        width: "Output".len() as u16,
-                        height: 1,
-                    },
-                );
-            }
-            Output::Empty => todo!(),
-        },
-        CurrentView::CommandWithOutput(command) => {
-            frame.render_widget(
-                Paragraph::new(command.input.as_str())
-                    .block(Block::new().white().on_black().borders(Borders::ALL))
-                    .wrap(Wrap { trim: false }),
-                left_layout[0],
-            );
-            match &command.output {
-                Output::Success(output) => {
-                    frame.render_widget(
-                        Paragraph::new(output.as_str())
-                            .block(Block::new().white().on_black().borders(Borders::ALL))
-                            .wrap(Wrap { trim: false }),
-                        outer_layout[1],
-                    );
-                    frame.render_widget(
-                        Paragraph::new("Output")
-                            .block(Block::new().white().on_black().bold())
-                            .wrap(Wrap { trim: false }),
-                        Rect {
-                            x: outer_layout[1].x,
-                            y: outer_layout[1].y,
-                            width: "Output".len() as u16,
-                            height: 1,
-                        },
-                    );
-                }
-                Output::Error(output) => {
-                    frame.render_widget(
-                        Paragraph::new(output.as_str())
-                            .block(Block::new().red().on_black().borders(Borders::ALL))
-                            .wrap(Wrap { trim: false }),
-                        outer_layout[1],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Output")
-                            .block(Block::new().red().on_black().bold())
-                            .wrap(Wrap { trim: false }),
-                        Rect {
-                            x: outer_layout[1].x,
-                            y: outer_layout[1].y,
-                            width: "Output".len() as u16,
-                            height: 1,
-                        },
-                    );
-                }
-                Output::Empty => todo!(),
-            }
-        }
-    }
-
-    render_input_heading(frame, model);
+    render_output(frame, model, outer_layout[1]);
+    render_input(frame, model, left_layout[0]);
 
     let amount_pinned_commands: usize = model.pinned_commands.len();
     let pinned_commands = model
@@ -239,7 +122,24 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
     );
 }
 
-fn render_input_heading(frame: &mut ratatui::Frame, model: &Model) {
+fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+    let widget = match &model.current_command {
+        CurrentView::CommandWithoutOutput(command) => Some(
+            Paragraph::new(command.input.as_str())
+                .block(Block::new().white().on_black().borders(Borders::ALL))
+                .wrap(Wrap { trim: false }),
+        ),
+        CurrentView::Output(_) => None,
+        CurrentView::CommandWithOutput(command) => Some(
+            Paragraph::new(command.input.as_str())
+                .block(Block::new().white().on_black().borders(Borders::ALL))
+                .wrap(Wrap { trim: false }),
+        ),
+    };
+    if let Some(widget) = widget {
+        frame.render_widget(widget, layout);
+    }
+
     let heading = match &model.mode {
         Mode::Idle | Mode::Quit => String::from("Input"),
         Mode::Editing(_) => String::from("Input - Editing"),
@@ -253,6 +153,51 @@ fn render_input_heading(frame: &mut ratatui::Frame, model: &Model) {
             x: 0,
             y: 0,
             width: heading.len() as u16,
+            height: 1,
+        },
+    );
+}
+
+fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+    let (output, block) = match &model.current_command {
+        CurrentView::CommandWithoutOutput(_) => (None, Block::new().white().on_black().bold()),
+        CurrentView::Output(o) => match o {
+            Output::Success(_) | Output::Empty => {
+                (Some(o.as_str()), Block::new().white().on_black().bold())
+            }
+            Output::Error(_) => (Some(o.as_str()), Block::new().red().on_black().bold()),
+        },
+        CurrentView::CommandWithOutput(o) => match o.output {
+            Output::Success(_) | Output::Empty => (
+                Some(o.output.as_str()),
+                Block::new().white().on_black().bold(),
+            ),
+            Output::Error(_) => (
+                Some(o.output.as_str()),
+                Block::new().red().on_black().bold(),
+            ),
+        },
+    };
+
+    if let Some(output) = output {
+        frame.render_widget(
+            Paragraph::new(output)
+                .block(block.clone().borders(Borders::ALL))
+                .wrap(Wrap { trim: false }),
+            layout,
+        );
+    } else {
+        frame.render_widget(block.clone().borders(Borders::ALL), layout);
+    }
+
+    frame.render_widget(
+        Paragraph::new("Output")
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        Rect {
+            x: layout.x,
+            y: layout.y,
+            width: "Output".len() as u16,
             height: 1,
         },
     );

@@ -126,7 +126,7 @@ fn base10_to_base26(mut num: u32) -> String {
     let mut result = String::new();
     while num > 0 {
         let digit = (num % 26) as u8;
-        result.push((digit + 'a' as u8) as char);
+        result.push((digit + b'a') as char);
         num /= 26;
     }
     if result.is_empty() {
@@ -144,7 +144,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
             let mut current_index_in_original_string: u64 = 0;
 
             let string_that_was_split =
-                split_string(&model.current_command.input_str().unwrap_or_default());
+                split_string(model.current_command.input_str().unwrap_or_default());
 
             if string_that_was_split.is_empty() {
                 frame.render_widget(
@@ -308,14 +308,10 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                             }
                         }
                         current_index_in_original_string += content.len() as u64;
-                        if x + 1 + content.len() as u16 > layout.width {
-                            x = 1;
-                            y += 1;
-                        }
 
                         y += 1;
                         x = 1;
-                        if let Some(_) = cursor_position_inside_content {
+                        if cursor_position_inside_content.is_some() {
                             let cursor_location = Rect {
                                 x,
                                 y,
@@ -420,17 +416,6 @@ pub enum StringType<'a> {
     Whitespace(&'a str),
     Tab(&'a str),
     Newline(&'a str),
-}
-
-impl<'a> StringType<'a> {
-    pub fn as_str(&self) -> &str {
-        match self {
-            StringType::Word(s) => s,
-            StringType::Whitespace(s) => s,
-            StringType::Tab(s) => s,
-            StringType::Newline(s) => s,
-        }
-    }
 }
 
 fn split_string(input: &str) -> Vec<StringType> {

@@ -137,7 +137,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             return;
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
-                        if '\\' == command.input.chars().last().unwrap() {
+                        if command.input.ends_with('\\') {
                             command.input.push('\n');
                             command.cursor_position += 1;
                             return;
@@ -210,8 +210,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 }
             }
             event::Event::Down => {
-                if model.command_history.len() == 0 {
-                    return;
+                if model.command_history.is_empty() {
                 } else if model.command_history_index < model.command_history.len() - 1 {
                     model.command_history_index += 1;
                     let completed_command = &model.command_history[model.command_history_index];
@@ -415,7 +414,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
         Mode::Quit => unreachable!(),
         Mode::Selecting(number) => match event {
             event::Event::Character(character) => {
-                if character.is_digit(10) {
+                if character.is_ascii_digit() {
                     number.push(character)
                 }
             }

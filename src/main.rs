@@ -1,9 +1,7 @@
 use arboard::Clipboard;
-use ratatui::{
-    layout::Rect,
-    style::Stylize,
-    widgets::{Block, Borders, Paragraph, Wrap},
-};
+
+mod event;
+mod view;
 
 fn has_open_quote(s: &str) -> Option<char> {
     let mut single_quote_open = false;
@@ -42,14 +40,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut model = Model::default();
 
     while !model.should_quit() {
-        terminal.draw(|frame| view(&model, frame))?;
+        terminal.draw(|frame| view::view(&model, frame))?;
 
-        let event = wait_for_event();
+        let event = event::wait_for_event();
         update(&mut model, event, &mut clipboard);
         if model.should_quit() {
             break;
         }
-        while let Some(next_event) = get_event() {
+        while let Some(next_event) = event::get_event() {
             update(&mut model, next_event, &mut clipboard);
         }
     }
@@ -58,287 +56,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn render_input_heading(frame: &mut ratatui::Frame, model: &Model) {
-    let heading = match model.mode {
-        Mode::Idle | Mode::Quit => "Input",
-        Mode::Editing(_) => "Input - Editing",
-    };
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(heading)
-            .block(Block::new().white().on_black().bold())
-            .wrap(Wrap { trim: false }),
-        Rect {
-            x: 0,
-            y: 0,
-            width: heading.len() as u16,
-            height: 1,
-        },
-    );
-}
-
-pub fn view(model: &Model, frame: &mut ratatui::Frame) {
-    let outer_layout = ratatui::layout::Layout::default()
-        .direction(ratatui::layout::Direction::Horizontal)
-        .constraints(vec![
-            ratatui::layout::Constraint::Percentage(50),
-            ratatui::layout::Constraint::Percentage(50),
-        ])
-        .split(frame.size());
-
-    let left_layout = ratatui::layout::Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints(vec![
-            ratatui::layout::Constraint::Percentage(50),
-            ratatui::layout::Constraint::Percentage(50),
-        ])
-        .split(outer_layout[0]);
-
-    frame.render_widget(
-        ratatui::widgets::Block::new()
-            .white()
-            .on_black()
-            .borders(ratatui::widgets::Borders::ALL),
-        left_layout[0],
-    );
-
-    frame.render_widget(
-        ratatui::widgets::Block::new()
-            .white()
-            .on_black()
-            .borders(ratatui::widgets::Borders::ALL),
-        left_layout[1],
-    );
-
-    match &model.current_command {
-        CurrentView::CommandWithoutOutput(_, command) => {
-            frame.render_widget(
-                Paragraph::new(command.as_str())
-                    .block(Block::new().white().on_black().borders(Borders::ALL))
-                    .wrap(Wrap { trim: false }),
-                left_layout[0],
-            );
-            frame.render_widget(
-                Block::new().white().on_black().borders(Borders::ALL),
-                outer_layout[1],
-            );
-            frame.render_widget(
-                Paragraph::new("Output")
-                    .block(Block::new().white().on_black().bold())
-                    .wrap(Wrap { trim: false }),
-                Rect {
-                    x: outer_layout[1].x,
-                    y: outer_layout[1].y,
-                    width: "Output".len() as u16,
-                    height: 1,
-                },
-            );
-        }
-        CurrentView::Output(output) => match output {
-            Output::Success(output) => {
-                frame.render_widget(
-                    Paragraph::new(output.as_str())
-                        .block(Block::new().white().on_black().borders(Borders::ALL))
-                        .wrap(Wrap { trim: false }),
-                    outer_layout[1],
-                );
-                frame.render_widget(
-                    Paragraph::new("Output")
-                        .block(Block::new().white().on_black().bold())
-                        .wrap(Wrap { trim: false }),
-                    Rect {
-                        x: outer_layout[1].x,
-                        y: outer_layout[1].y,
-                        width: "Output".len() as u16,
-                        height: 1,
-                    },
-                );
-            }
-            Output::Error(output) => {
-                frame.render_widget(
-                    Paragraph::new(output.as_str())
-                        .block(Block::new().red().on_black().borders(Borders::ALL))
-                        .wrap(Wrap { trim: false }),
-                    outer_layout[1],
-                );
-
-                frame.render_widget(
-                    Paragraph::new("Output")
-                        .block(Block::new().red().on_black().bold())
-                        .wrap(Wrap { trim: false }),
-                    Rect {
-                        x: outer_layout[1].x,
-                        y: outer_layout[1].y,
-                        width: "Output".len() as u16,
-                        height: 1,
-                    },
-                );
-            }
-            Output::Empty => todo!(),
-        },
-        CurrentView::CommandWithOutput(command) => {
-            frame.render_widget(
-                Paragraph::new(command.input.as_str())
-                    .block(Block::new().white().on_black().borders(Borders::ALL))
-                    .wrap(Wrap { trim: false }),
-                left_layout[0],
-            );
-            match &command.output {
-                Output::Success(output) => {
-                    frame.render_widget(
-                        Paragraph::new(output.as_str())
-                            .block(Block::new().white().on_black().borders(Borders::ALL))
-                            .wrap(Wrap { trim: false }),
-                        outer_layout[1],
-                    );
-                    frame.render_widget(
-                        Paragraph::new("Output")
-                            .block(Block::new().white().on_black().bold())
-                            .wrap(Wrap { trim: false }),
-                        Rect {
-                            x: outer_layout[1].x,
-                            y: outer_layout[1].y,
-                            width: "Output".len() as u16,
-                            height: 1,
-                        },
-                    );
-                }
-                Output::Error(output) => {
-                    frame.render_widget(
-                        Paragraph::new(output.as_str())
-                            .block(Block::new().red().on_black().borders(Borders::ALL))
-                            .wrap(Wrap { trim: false }),
-                        outer_layout[1],
-                    );
-
-                    frame.render_widget(
-                        Paragraph::new("Output")
-                            .block(Block::new().red().on_black().bold())
-                            .wrap(Wrap { trim: false }),
-                        Rect {
-                            x: outer_layout[1].x,
-                            y: outer_layout[1].y,
-                            width: "Output".len() as u16,
-                            height: 1,
-                        },
-                    );
-                }
-                Output::Empty => todo!(),
-            }
-        }
-    }
-
-    render_input_heading(frame, model);
-
-    let commands = model
-        .command_history
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(index, command)| format!("{}: {}", index, command.input))
-        .collect::<Vec<String>>()
-        .join("\n");
-
-    frame.render_widget(
-        Paragraph::new(commands)
-            .block(Block::new().white().on_black())
-            .wrap(Wrap { trim: false }),
-        Rect {
-            x: left_layout[1].x + 1,
-            y: left_layout[1].y + 1,
-            width: left_layout[1].width - 2,
-            height: left_layout[1].height - 2,
-        },
-    );
-
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new("History")
-            .block(Block::new().white().on_black().bold())
-            .wrap(Wrap { trim: false }),
-        left_layout[1],
-    );
-}
-
-pub fn wait_for_event() -> Event {
-    let mut event = None;
-    while event.is_none() {
-        // TODO: remove unwrap
-        while !crossterm::event::poll(std::time::Duration::from_secs(10)).unwrap() {
-            // do nothing
-        }
-
-        let crossterm_event = crossterm::event::read().unwrap();
-        event = create_event(crossterm_event);
-    }
-    // SAFETY: safe because while loop existed only when event was Some
-    event.unwrap()
-}
-
-pub fn get_event() -> Option<Event> {
-    // TODO: remove unwrap
-    if crossterm::event::poll(std::time::Duration::from_secs(0)).unwrap() {
-        // TODO: remove unwrap
-        create_event(crossterm::event::read().unwrap())
-    } else {
-        None
-    }
-}
-
-pub fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
-    match crossterm_event {
-        crossterm::event::Event::Key(key) => {
-            if key.kind == crossterm::event::KeyEventKind::Press {
-                match key.code {
-                    crossterm::event::KeyCode::Char('c')
-                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
-                    {
-                        Some(Event::CtrlC)
-                    }
-                    crossterm::event::KeyCode::Char('e')
-                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
-                    {
-                        Some(Event::CtrlE)
-                    }
-                    crossterm::event::KeyCode::Char('h')
-                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
-                    {
-                        Some(Event::CtrlH)
-                    }
-                    crossterm::event::KeyCode::Char('v')
-                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
-                    {
-                        Some(Event::CtrlV)
-                    }
-                    crossterm::event::KeyCode::Backspace => Some(Event::Backspace),
-                    crossterm::event::KeyCode::Esc => Some(Event::Esc),
-                    crossterm::event::KeyCode::Enter => Some(Event::Enter),
-                    crossterm::event::KeyCode::Up => Some(Event::Up),
-                    crossterm::event::KeyCode::Down => Some(Event::Down),
-                    crossterm::event::KeyCode::Char(c) => Some(Event::Character(c)),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
-    if event == Event::CtrlC {
+pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard) {
+    if event == event::Event::CtrlC {
         model.mode = Mode::Quit;
         return;
     }
 
-    match model.mode {
+    match &mut model.mode {
         Mode::Idle => match event {
-            Event::CtrlC => {
+            event::Event::CtrlC => {
                 model.mode = Mode::Quit;
             }
-            Event::CtrlE => {
+            event::Event::CtrlE => {
                 match &model.current_command {
-                    CurrentView::CommandWithoutOutput(_, command) => {
-                        if !command.is_empty() {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        if !command.input.is_empty() {
                             model.mode = Mode::Editing(String::new());
                         }
                     }
@@ -351,17 +83,17 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                     }
                 }
             }
-            Event::CtrlH => {
+            event::Event::CtrlH => {
                 model.config.hint_state = match model.config.hint_state {
                     HintState::ShowHints => HintState::HideHints,
                     HintState::HideHints => HintState::ShowHints,
                 }
             }
-            Event::Backspace => {
+            event::Event::Backspace => {
                 match &mut model.current_command {
-                    CurrentView::CommandWithoutOutput(inside_quote, command) => {
-                        command.pop();
-                        *inside_quote = has_open_quote(&command);
+                    CurrentView::CommandWithoutOutput(command) => {
+                        command.input.pop();
+                        command.inside_quote = has_open_quote(&command.input);
                     }
                     CurrentView::CommandWithOutput(command) => {
                         let mut command = command.input.clone();
@@ -369,7 +101,10 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                         let inside_quote = has_open_quote(&command);
                         if let Some(inside_quote) = inside_quote {
                             model.current_command =
-                                CurrentView::CommandWithoutOutput(Some(inside_quote), command);
+                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                    inside_quote: Some(inside_quote),
+                                    input: command,
+                                });
                             model.command_history_index = model.command_history.len();
                         } else {
                             model.set_current_view_from_command(command);
@@ -380,33 +115,33 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                     }
                 };
             }
-            Event::Esc => {
+            event::Event::Esc => {
                 // do nothing
             }
-            Event::Enter => {
+            event::Event::Enter => {
                 match &mut model.current_command {
-                    CurrentView::CommandWithoutOutput(inside_quote, command) => {
-                        if command.is_empty() {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        if command.input.is_empty() {
                             return;
                         }
-                        if inside_quote.is_some() {
-                            command.push('\n');
+                        if command.inside_quote.is_some() {
+                            command.input.push('\n');
                             return;
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
-                        if '\\' == command.chars().last().unwrap() {
-                            command.push('\n');
+                        if '\\' == command.input.chars().last().unwrap() {
+                            command.input.push('\n');
                             return;
                         }
 
                         let executed_command = std::process::Command::new("sh")
                             .arg("-c")
-                            .arg(&command)
+                            .arg(&command.input)
                             .output()
                             .expect("failed to execute process");
 
                         let completed_command = CompletedCommand {
-                            input: command.clone(),
+                            input: command.input.clone(),
                             output: {
                                 if executed_command.status.success() {
                                     Output::Success(
@@ -457,7 +192,7 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                 };
                 model.command_history_index = model.command_history.len();
             }
-            Event::Up => {
+            event::Event::Up => {
                 if model.command_history_index > 0 {
                     model.command_history_index -= 1;
                     let completed_command = &model.command_history[model.command_history_index];
@@ -465,7 +200,7 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                         CurrentView::CommandWithOutput(completed_command.clone());
                 }
             }
-            Event::Down => {
+            event::Event::Down => {
                 if model.command_history.len() == 0 {
                     return;
                 } else if model.command_history_index < model.command_history.len() - 1 {
@@ -473,19 +208,19 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                     let completed_command = &model.command_history[model.command_history_index];
                     model.current_command =
                         CurrentView::CommandWithOutput(completed_command.clone());
-                } else if model.command_history_index == model.command_history.len() - 1 {
+                } else {
                     model.set_current_view_from_command(String::new());
                 }
             }
-            Event::Character(c) => {
+            event::Event::Character(c) => {
                 // TODO: escaping characters
                 match &mut model.current_command {
-                    CurrentView::CommandWithoutOutput(inside_quote, command) => {
-                        command.push(c);
-                        if inside_quote.is_none() && (c == '\'' || c == '"') {
-                            *inside_quote = Some(c);
-                        } else if inside_quote == &Some(c) {
-                            *inside_quote = None;
+                    CurrentView::CommandWithoutOutput(command) => {
+                        command.input.push(c);
+                        if command.inside_quote.is_none() && (c == '\'' || c == '"') {
+                            command.inside_quote = Some(c);
+                        } else if command.inside_quote == Some(c) {
+                            command.inside_quote = None;
                         }
                     }
                     CurrentView::CommandWithOutput(command) => {
@@ -493,10 +228,16 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                         command.push(c);
                         if c == '\'' || c == '"' {
                             model.current_command =
-                                CurrentView::CommandWithoutOutput(Some(c), command);
+                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                    inside_quote: Some(c),
+                                    input: command,
+                                });
                         } else {
                             model.current_command =
-                                CurrentView::CommandWithoutOutput(None, command);
+                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                    inside_quote: None,
+                                    input: command,
+                                });
                         }
                         model.command_history_index = model.command_history.len();
                     }
@@ -505,61 +246,130 @@ pub fn update(model: &mut Model, event: Event, clipboard: &mut Clipboard) {
                     }
                 };
             }
-            Event::CtrlV => match &model.current_command {
-                CurrentView::CommandWithoutOutput(_, command) => {
-                    let new_command = format!("{}{}", command, clipboard.get_text().unwrap());
-                    model.current_command = CurrentView::CommandWithoutOutput(
-                        has_open_quote(new_command.as_str()),
-                        new_command,
-                    );
+            event::Event::CtrlV => match &model.current_command {
+                CurrentView::CommandWithoutOutput(command) => {
+                    let new_command = format!("{}{}", command.input, clipboard.get_text().unwrap());
+                    model.current_command =
+                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                            inside_quote: has_open_quote(new_command.as_str()),
+                            input: new_command,
+                        });
                 }
                 CurrentView::CommandWithOutput(command) => {
                     let new_command = format!("{}{}", command.input, clipboard.get_text().unwrap());
-                    model.current_command = CurrentView::CommandWithoutOutput(
-                        has_open_quote(new_command.as_str()),
-                        new_command,
-                    );
+                    model.current_command =
+                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                            inside_quote: has_open_quote(new_command.as_str()),
+                            input: new_command,
+                        });
                 }
                 CurrentView::Output(_) => {
                     let new_command = clipboard.get_text().unwrap();
-                    model.current_command = CurrentView::CommandWithoutOutput(
-                        has_open_quote(new_command.as_str()),
-                        new_command,
-                    );
+                    model.current_command =
+                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                            inside_quote: has_open_quote(new_command.as_str()),
+                            input: new_command,
+                        });
                     model.command_history_index = model.command_history.len();
                 }
             },
+            event::Event::CtrlP => match &model.current_command {
+                CurrentView::CommandWithoutOutput(c) => {
+                    if c.input.is_empty() {
+                        return;
+                    }
+                    let position = model
+                        .pinned_commands
+                        .iter()
+                        .map(|pinned_command| pinned_command.input.clone())
+                        .position(|past_command| past_command == c.input);
+                    if let Some(position) = position {
+                        model.pinned_commands.remove(position);
+                    } else {
+                        model.pinned_commands.push(CommandWithoutOutput {
+                            inside_quote: c.inside_quote,
+                            input: c.input.clone(),
+                        })
+                    }
+                }
+                CurrentView::Output(_) => {}
+                CurrentView::CommandWithOutput(c) => {
+                    if c.input.is_empty() {
+                        return;
+                    }
+                    let position = model
+                        .pinned_commands
+                        .iter()
+                        .map(|pinned_command| pinned_command.input.clone())
+                        .position(|past_command| past_command == c.input);
+                    if let Some(position) = position {
+                        model.pinned_commands.remove(position);
+                    } else {
+                        model.pinned_commands.push(CommandWithoutOutput {
+                            inside_quote: None,
+                            input: c.input.clone(),
+                        })
+                    }
+                }
+            },
+            event::Event::CtrlS => {
+                model.mode = Mode::Selecting(String::new());
+            }
         },
         Mode::Editing(_) => match event {
-            Event::CtrlC => todo!(),
-            Event::CtrlH => todo!(),
-            Event::Backspace => todo!(),
-            Event::Esc | Event::CtrlE => {
+            event::Event::CtrlC => todo!(),
+            event::Event::CtrlH => todo!(),
+            event::Event::Backspace => todo!(),
+            event::Event::Esc | event::Event::CtrlE => {
                 model.mode = Mode::Idle;
             }
-            Event::Enter => todo!(),
-            Event::Up => todo!(),
-            Event::Down => todo!(),
-            Event::Character(_) => todo!(),
-            Event::CtrlV => todo!(),
+            event::Event::Enter => todo!(),
+            event::Event::Up => todo!(),
+            event::Event::Down => todo!(),
+            event::Event::Character(_) => todo!(),
+            event::Event::CtrlV => todo!(),
+            event::Event::CtrlP => todo!(),
+            event::Event::CtrlS => todo!(),
         },
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
         Mode::Quit => unreachable!(),
+        Mode::Selecting(number) => match event {
+            event::Event::Character(character) => {
+                if character.is_digit(10) {
+                    number.push(character)
+                }
+            }
+            event::Event::Enter => {
+                let number = number.parse::<usize>().unwrap();
+                if number < model.command_history.len() + model.pinned_commands.len() {
+                    if number < model.pinned_commands.len() {
+                        let completed_command = &model.pinned_commands[number];
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                inside_quote: completed_command.inside_quote,
+                                input: completed_command.input.clone(),
+                            });
+                        model.command_history_index = model.command_history.len();
+                    } else {
+                        let index =
+                            model.command_history.len() + model.pinned_commands.len() - number - 1;
+                        let completed_command = &model.command_history[index];
+                        model.set_current_view_from_command(completed_command.input.clone());
+                    };
+                }
+                model.mode = Mode::Idle;
+            }
+            event::Event::Backspace => {
+                number.pop();
+            }
+            event::Event::Esc => {
+                model.mode = Mode::Idle;
+            }
+            _ => {
+                // do nothing
+            }
+        },
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Event {
-    CtrlC,
-    CtrlE,
-    CtrlH,
-    CtrlV,
-    Backspace,
-    Esc,
-    Enter,
-    Up,
-    Down,
-    Character(char),
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -567,6 +377,7 @@ pub enum Mode {
     #[default]
     Idle,
     Editing(String),
+    Selecting(String),
     Quit,
 }
 
@@ -591,6 +402,12 @@ pub enum Output {
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
+pub struct CommandWithoutOutput {
+    inside_quote: Option<char>,
+    input: String,
+}
+
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct CompletedCommand {
     input: String,
     output: Output,
@@ -598,14 +415,14 @@ pub struct CompletedCommand {
 
 #[derive(Debug, PartialEq)]
 pub enum CurrentView {
-    CommandWithoutOutput(Option<char>, String),
+    CommandWithoutOutput(CommandWithoutOutput),
     Output(Output),
     CommandWithOutput(CompletedCommand),
 }
 
 impl Default for CurrentView {
     fn default() -> Self {
-        Self::CommandWithoutOutput(None, String::new())
+        Self::CommandWithoutOutput(CommandWithoutOutput::default())
     }
 }
 
@@ -615,6 +432,7 @@ pub struct Model {
     config: Config,
     command_history: Vec<CompletedCommand>,
     command_history_index: usize,
+    pinned_commands: Vec<CommandWithoutOutput>,
     current_command: CurrentView,
 }
 
@@ -624,7 +442,10 @@ impl Model {
     }
 
     fn set_current_view_from_command(&mut self, command: String) {
-        self.current_command = CurrentView::CommandWithoutOutput(None, command);
+        self.current_command = CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+            inside_quote: None,
+            input: command,
+        });
         self.command_history_index = self.command_history.len();
     }
 }

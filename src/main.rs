@@ -444,6 +444,16 @@ pub enum CurrentView {
     CommandWithOutput(CompletedCommand),
 }
 
+impl CurrentView {
+    pub fn input_str(&self) -> Option<&str> {
+        match self {
+            CurrentView::CommandWithoutOutput(command) => Some(command.input.as_str()),
+            CurrentView::Output(_) => None,
+            CurrentView::CommandWithOutput(command) => Some(command.input.as_str()),
+        }
+    }
+}
+
 impl Default for CurrentView {
     fn default() -> Self {
         Self::CommandWithoutOutput(CommandWithoutOutput::default())
@@ -502,5 +512,188 @@ mod tui {
             disable_raw_mode().unwrap();
             original_hook(panic_info);
         }));
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum StringType<'a> {
+    Word(&'a str),
+    Whitespace(&'a str),
+    Tab(&'a str),
+    Newline(&'a str),
+}
+
+impl<'a> StringType<'a> {
+    pub fn as_str(&self) -> &str {
+        match self {
+            StringType::Word(s) => s,
+            StringType::Whitespace(s) => s,
+            StringType::Tab(s) => s,
+            StringType::Newline(s) => s,
+        }
+    }
+}
+
+fn split_string(input: &str) -> Vec<StringType> {
+    let mut result = Vec::new();
+    let mut chars = input.char_indices().peekable();
+    let mut last_index = 0;
+
+    while let Some((index, ch)) = chars.next() {
+        if ch.is_whitespace() {
+            // if there is a word before this whitespace, push it
+            if index != last_index {
+                result.push(StringType::Word(&input[last_index..index]));
+            }
+
+            match ch {
+                ' ' => {
+                    let whitespace_start = index;
+                    last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
+                    // consume continuous spaces
+                    while let Some(&(_, ' ')) = chars.peek() {
+                        chars.next();
+                        last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
+                    }
+                    result.push(StringType::Whitespace(&input[whitespace_start..last_index]));
+                }
+                '\t' => {
+                    result.push(StringType::Tab(&input[index..index + 1]));
+                    last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
+                }
+                '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
+                    // for "\r\n", take both characters together as newline
+                    result.push(StringType::Newline(&input[index..index + 2]));
+                    chars.next();
+
+                    last_index = index + 2;
+                }
+                '\n' | '\r' => {
+                    // single newline character
+                    result.push(StringType::Newline(&input[index..index + 1]));
+                    last_index = index + 1;
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    // Push the remaining part of the string as a word, if any non-whitespace characters are trailing
+    if last_index != input.len() {
+        result.push(StringType::Word(&input[last_index..input.len()]));
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_single_word() {
+        assert_eq!(split_string("world"), vec![StringType::Word("world")]);
+    }
+
+    #[test]
+    fn test_basic_split() {
+        assert_eq!(
+            split_string("hello world"),
+            vec![
+                StringType::Word("hello"),
+                StringType::Whitespace(" "),
+                StringType::Word("world")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_multiple_spaces() {
+        assert_eq!(
+            split_string("hello  world"),
+            vec![
+                StringType::Word("hello"),
+                StringType::Whitespace("  "),
+                StringType::Word("world")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_mixed_whitespace() {
+        assert_eq!(
+            split_string("hello  \n\t  world"),
+            vec![
+                StringType::Word("hello"),
+                StringType::Whitespace("  "),
+                StringType::Newline("\n"),
+                StringType::Tab("\t"),
+                StringType::Whitespace("  "),
+                StringType::Word("world")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_start_end_with_spaces() {
+        assert_eq!(
+            split_string("  hello world  "),
+            vec![
+                StringType::Whitespace("  "),
+                StringType::Word("hello"),
+                StringType::Whitespace(" "),
+                StringType::Word("world"),
+                StringType::Whitespace("  "),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_empty_string() {
+        let empty: Vec<StringType> = Vec::new();
+        assert_eq!(split_string(""), empty);
+    }
+
+    #[test]
+    fn test_tabs_newlines_spaces() {
+        assert_eq!(
+            split_string("\t\tI love\r\nRust programming\rlanguage.  "),
+            vec![
+                StringType::Tab("\t"),
+                StringType::Tab("\t"),
+                StringType::Word("I"),
+                StringType::Whitespace(" "),
+                StringType::Word("love"),
+                StringType::Newline("\r\n"),
+                StringType::Word("Rust"),
+                StringType::Whitespace(" "),
+                StringType::Word("programming"),
+                StringType::Newline("\r"),
+                StringType::Word("language."),
+                StringType::Whitespace("  ")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tabs_newlines_spaces_2() {
+        assert_eq!(
+            split_string("\t\tI love\r\n   Rust programming\rlanguage.  "),
+            vec![
+                StringType::Tab("\t"),
+                StringType::Tab("\t"),
+                StringType::Word("I"),
+                StringType::Whitespace(" "),
+                StringType::Word("love"),
+                StringType::Newline("\r\n"),
+                StringType::Whitespace("   "),
+                StringType::Word("Rust"),
+                StringType::Whitespace(" "),
+                StringType::Word("programming"),
+                StringType::Newline("\r"),
+                StringType::Word("language."),
+                StringType::Whitespace("  ")
+            ]
+        );
     }
 }

@@ -123,21 +123,13 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
 }
 
 fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
-    let widget = match &model.current_command {
-        CurrentView::CommandWithoutOutput(command) => Some(
-            Paragraph::new(command.input.as_str())
+    if let Some(input) = model.current_command.input_str() {
+        frame.render_widget(
+            Paragraph::new(input)
                 .block(Block::new().white().on_black().borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
-        ),
-        CurrentView::Output(_) => None,
-        CurrentView::CommandWithOutput(command) => Some(
-            Paragraph::new(command.input.as_str())
-                .block(Block::new().white().on_black().borders(Borders::ALL))
-                .wrap(Wrap { trim: false }),
-        ),
-    };
-    if let Some(widget) = widget {
-        frame.render_widget(widget, layout);
+            layout,
+        );
     }
 
     let heading = match &model.mode {

@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use crate::{CurrentView, Mode, Model, Output};
+use crate::{split_string, CurrentView, Mode, Model, Output, StringType};
 
 pub fn view(model: &Model, frame: &mut ratatui::Frame) {
     let outer_layout = ratatui::layout::Layout::default()
@@ -339,7 +339,11 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
 
     let heading = match &model.mode {
         Mode::Idle | Mode::Quit => String::from("Input"),
-        Mode::Editing(_) => String::from("Input - Editing"),
+        // Mode::Idle | Mode::Quit => format!(
+        //     "Input - Cursor({})",
+        //     model.current_command.cursor_position().unwrap_or_default()
+        // ),
+        Mode::Editing(hint) => format!("Input - Editing({})", hint),
         Mode::Selecting(number) => format!("Input - Selecting({})", number),
     };
     frame.render_widget(
@@ -400,69 +404,9 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
     );
 }
 
-#[derive(Debug, PartialEq)]
-pub enum StringType<'a> {
-    Word(&'a str),
-    Whitespace(&'a str),
-    Tab(&'a str),
-    Newline(&'a str),
-}
-
-fn split_string(input: &str) -> Vec<StringType> {
-    let mut result = Vec::new();
-    let mut chars = input.char_indices().peekable();
-    let mut last_index = 0;
-
-    while let Some((index, ch)) = chars.next() {
-        if ch.is_whitespace() {
-            // if there is a word before this whitespace, push it
-            if index != last_index {
-                result.push(StringType::Word(&input[last_index..index]));
-            }
-
-            match ch {
-                ' ' => {
-                    let whitespace_start = index;
-                    last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
-                    // consume continuous spaces
-                    while let Some(&(_, ' ')) = chars.peek() {
-                        chars.next();
-                        last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
-                    }
-                    result.push(StringType::Whitespace(&input[whitespace_start..last_index]));
-                }
-                '\t' => {
-                    result.push(StringType::Tab(&input[index..index + 1]));
-                    last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
-                }
-                '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
-                    // for "\r\n", take both characters together as newline
-                    result.push(StringType::Newline(&input[index..index + 2]));
-                    chars.next();
-
-                    last_index = index + 2;
-                }
-                '\n' | '\r' => {
-                    // single newline character
-                    result.push(StringType::Newline(&input[index..index + 1]));
-                    last_index = index + 1;
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    // Push the remaining part of the string as a word, if any non-whitespace characters are trailing
-    if last_index != input.len() {
-        result.push(StringType::Word(&input[last_index..input.len()]));
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{split_string, StringType};
 
     #[test]
     fn test_single_word() {

@@ -3,6 +3,77 @@ use arboard::Clipboard;
 mod event;
 mod view;
 
+#[derive(Debug, PartialEq)]
+pub enum StringType<'a> {
+    Word(&'a str),
+    Whitespace(&'a str),
+    Tab(&'a str),
+    Newline(&'a str),
+}
+
+impl<'a> StringType<'a> {
+    pub fn as_str(&self) -> &str {
+        match self {
+            StringType::Word(s) => s,
+            StringType::Whitespace(s) => s,
+            StringType::Tab(s) => s,
+            StringType::Newline(s) => s,
+        }
+    }
+}
+
+fn split_string(input: &str) -> Vec<StringType> {
+    let mut result = Vec::new();
+    let mut chars = input.char_indices().peekable();
+    let mut last_index = 0;
+
+    while let Some((index, ch)) = chars.next() {
+        if ch.is_whitespace() {
+            // if there is a word before this whitespace, push it
+            if index != last_index {
+                result.push(StringType::Word(&input[last_index..index]));
+            }
+
+            match ch {
+                ' ' => {
+                    let whitespace_start = index;
+                    last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
+                    // consume continuous spaces
+                    while let Some(&(_, ' ')) = chars.peek() {
+                        chars.next();
+                        last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
+                    }
+                    result.push(StringType::Whitespace(&input[whitespace_start..last_index]));
+                }
+                '\t' => {
+                    result.push(StringType::Tab(&input[index..index + 1]));
+                    last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
+                }
+                '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
+                    // for "\r\n", take both characters together as newline
+                    result.push(StringType::Newline(&input[index..index + 2]));
+                    chars.next();
+
+                    last_index = index + 2;
+                }
+                '\n' | '\r' => {
+                    // single newline character
+                    result.push(StringType::Newline(&input[index..index + 1]));
+                    last_index = index + 1;
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    // Push the remaining part of the string as a word, if any non-whitespace characters are trailing
+    if last_index != input.len() {
+        result.push(StringType::Word(&input[last_index..input.len()]));
+    }
+
+    result
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
@@ -392,17 +463,75 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 }
             }
         },
-        Mode::Editing(_) => match event {
-            event::Event::CtrlC => todo!(),
+        Mode::Editing(hint) => match event {
+            event::Event::CtrlC => {
+                model.mode = Mode::Quit;
+            }
             event::Event::CtrlH => todo!(),
             event::Event::Backspace => todo!(),
             event::Event::Esc | event::Event::CtrlE => {
                 model.mode = Mode::Idle;
             }
-            event::Event::Enter => todo!(),
+            event::Event::Enter => match &model.current_command {
+                CurrentView::CommandWithoutOutput(command) => {
+                    fn base26_to_base10(input: &str) -> Option<u32> {
+                        let mut result = 0;
+                        for (i, c) in input.chars().rev().enumerate() {
+                            let value = match c {
+                                'a'..='z' => c as u32 - 'a' as u32,
+                                _ => return None, // Invalid character
+                            };
+                            result += value * 26u32.pow(i as u32);
+                        }
+                        Some(result)
+                    }
+                    let index = base26_to_base10(hint).unwrap_or_default();
+                    model.mode = Mode::Idle;
+                    let mut split_command = split_string(&command.input);
+                    let mut current = 0;
+                    let mut new_cursor_position = 0;
+                    let mut index_to_delete = None;
+                    for (real_index, element) in split_command.iter().enumerate() {
+                        match element {
+                            StringType::Word(w) => {
+                                if current == index {
+                                    index_to_delete = Some(real_index);
+                                    break;
+                                }
+                                current += 1;
+                                new_cursor_position += w.len() as u64;
+                            }
+                            StringType::Newline(c)
+                            | StringType::Tab(c)
+                            | StringType::Whitespace(c) => {
+                                new_cursor_position += c.len() as u64;
+                            }
+                        }
+                    }
+                    if let Some(index_to_delete) = index_to_delete {
+                        split_command.remove(index_to_delete);
+
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                inside_quote: command.inside_quote,
+                                cursor_position: new_cursor_position,
+                                input: split_command
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect::<Vec<&str>>()
+                                    .join(""),
+                            });
+                    }
+                }
+                _ => unreachable!(),
+            },
             event::Event::Up => todo!(),
             event::Event::Down => todo!(),
-            event::Event::Character(_) => todo!(),
+            event::Event::Character(c) => {
+                if c.is_alphabetic() {
+                    hint.push(c);
+                }
+            }
             event::Event::CtrlV => todo!(),
             event::Event::CtrlP => todo!(),
             event::Event::CtrlS => todo!(),

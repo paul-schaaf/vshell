@@ -3,35 +3,6 @@ use arboard::Clipboard;
 mod event;
 mod view;
 
-fn has_open_quote(s: &str) -> Option<char> {
-    let mut single_quote_open = false;
-    let mut double_quote_open = false;
-
-    for c in s.chars() {
-        match c {
-            '\'' => {
-                if !double_quote_open {
-                    single_quote_open = !single_quote_open
-                }
-            }
-            '\"' => {
-                if !single_quote_open {
-                    double_quote_open = !double_quote_open
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if single_quote_open {
-        Some('\'')
-    } else if double_quote_open {
-        Some('"')
-    } else {
-        None
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
@@ -57,6 +28,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard) {
+    fn has_open_quote(s: &str) -> Option<char> {
+        let mut single_quote_open = false;
+        let mut double_quote_open = false;
+
+        for c in s.chars() {
+            match c {
+                '\'' => {
+                    if !double_quote_open {
+                        single_quote_open = !single_quote_open
+                    }
+                }
+                '\"' => {
+                    if !single_quote_open {
+                        double_quote_open = !double_quote_open
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if single_quote_open {
+            Some('\'')
+        } else if double_quote_open {
+            Some('"')
+        } else {
+            None
+        }
+    }
+
     if event == event::Event::CtrlC {
         model.mode = Mode::Quit;
         return;

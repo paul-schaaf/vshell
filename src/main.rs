@@ -76,7 +76,10 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     }
                     CurrentView::CommandWithOutput(command) => {
                         model.mode = Mode::Editing(String::new());
-                        model.set_current_view_from_command(command.input.clone());
+                        model.set_current_view_from_command(
+                            command.input.len() as u64,
+                            command.input.clone(),
+                        );
                     }
                     CurrentView::Output(_) => {
                         // do nothing
@@ -92,8 +95,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::Backspace => {
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
-                        command.input.pop();
-                        command.inside_quote = has_open_quote(&command.input);
+                        if command.cursor_position > 0 {
+                            command.input.remove(command.cursor_position as usize - 1);
+                            command.cursor_position -= 1;
+                            command.inside_quote = has_open_quote(&command.input);
+                        }
                     }
                     CurrentView::CommandWithOutput(command) => {
                         let mut command = command.input.clone();
@@ -103,11 +109,12 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             model.current_command =
                                 CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                                     inside_quote: Some(inside_quote),
+                                    cursor_position: command.len() as u64,
                                     input: command,
                                 });
                             model.command_history_index = model.command_history.len();
                         } else {
-                            model.set_current_view_from_command(command);
+                            model.set_current_view_from_command(command.len() as u64, command);
                         }
                     }
                     CurrentView::Output(_) => {
@@ -126,11 +133,13 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         }
                         if command.inside_quote.is_some() {
                             command.input.push('\n');
+                            command.cursor_position += 1;
                             return;
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
                         if '\\' == command.input.chars().last().unwrap() {
                             command.input.push('\n');
+                            command.cursor_position += 1;
                             return;
                         }
 
@@ -209,14 +218,15 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     model.current_command =
                         CurrentView::CommandWithOutput(completed_command.clone());
                 } else {
-                    model.set_current_view_from_command(String::new());
+                    model.set_current_view_from_command(0, String::new());
                 }
             }
             event::Event::Character(c) => {
                 // TODO: escaping characters
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
-                        command.input.push(c);
+                        command.input.insert(command.cursor_position as usize, c);
+                        command.cursor_position += 1;
                         if command.inside_quote.is_none() && (c == '\'' || c == '"') {
                             command.inside_quote = Some(c);
                         } else if command.inside_quote == Some(c) {
@@ -230,37 +240,44 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             model.current_command =
                                 CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                                     inside_quote: Some(c),
+                                    cursor_position: command.len() as u64,
                                     input: command,
                                 });
                         } else {
                             model.current_command =
                                 CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                                     inside_quote: None,
+                                    cursor_position: command.len() as u64,
                                     input: command,
                                 });
                         }
                         model.command_history_index = model.command_history.len();
                     }
                     CurrentView::Output(_) => {
-                        model.set_current_view_from_command(String::from(c));
+                        model.set_current_view_from_command(1, String::from(c));
                     }
                 };
             }
             event::Event::CtrlV => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
-                    let new_command = format!("{}{}", command.input, clipboard.get_text().unwrap());
+                    let text_to_insert = clipboard.get_text().unwrap();
+                    let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                             inside_quote: has_open_quote(new_command.as_str()),
                             input: new_command,
+                            cursor_position: command.cursor_position + text_to_insert.len() as u64,
                         });
                 }
                 CurrentView::CommandWithOutput(command) => {
-                    let new_command = format!("{}{}", command.input, clipboard.get_text().unwrap());
+                    let text_to_insert = clipboard.get_text().unwrap();
+                    let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                             inside_quote: has_open_quote(new_command.as_str()),
                             input: new_command,
+                            cursor_position: command.input.len() as u64
+                                + text_to_insert.len() as u64,
                         });
                 }
                 CurrentView::Output(_) => {
@@ -268,6 +285,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                             inside_quote: has_open_quote(new_command.as_str()),
+                            cursor_position: new_command.len() as u64,
                             input: new_command,
                         });
                     model.command_history_index = model.command_history.len();
@@ -289,6 +307,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         model.pinned_commands.push(CommandWithoutOutput {
                             inside_quote: c.inside_quote,
                             input: c.input.clone(),
+                            cursor_position: c.cursor_position,
                         })
                     }
                 }
@@ -308,6 +327,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         model.pinned_commands.push(CommandWithoutOutput {
                             inside_quote: None,
                             input: c.input.clone(),
+                            cursor_position: c.input.len() as u64,
                         })
                     }
                 }
@@ -328,6 +348,50 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     }
                 }
             }
+            event::Event::Left => {
+                match &mut model.current_command {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        if command.cursor_position > 0 {
+                            command.cursor_position -= 1;
+                        }
+                    }
+                    CurrentView::CommandWithOutput(command) => {
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                inside_quote: None,
+                                // SAFETY: this is a command with output so it has completed
+                                // which means its input must have had at least length one
+                                cursor_position: command.input.len() as u64 - 1,
+                                input: command.input.clone(),
+                            });
+                        model.command_history_index = model.command_history.len();
+                    }
+                    CurrentView::Output(_) => {
+                        // do nothing
+                    }
+                }
+            }
+            event::Event::Right => {
+                match &mut model.current_command {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        if command.cursor_position < command.input.len() as u64 {
+                            command.cursor_position += 1;
+                        }
+                    }
+                    CurrentView::CommandWithOutput(command) => {
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                inside_quote: None,
+                                cursor_position: command.input.len() as u64,
+                                input: command.input.clone(),
+                            });
+                        model.command_history_index = model.command_history.len();
+                    }
+                    CurrentView::Output(_) => {
+                        // do nothing
+                    }
+                }
+            }
         },
         Mode::Editing(_) => match event {
             event::Event::CtrlC => todo!(),
@@ -344,6 +408,8 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::CtrlP => todo!(),
             event::Event::CtrlS => todo!(),
             event::Event::CtrlO => todo!(),
+            event::Event::Left => todo!(),
+            event::Event::Right => todo!(),
         },
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
         Mode::Quit => unreachable!(),
@@ -362,13 +428,17 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                                 inside_quote: completed_command.inside_quote,
                                 input: completed_command.input.clone(),
+                                cursor_position: completed_command.cursor_position,
                             });
                         model.command_history_index = model.command_history.len();
                     } else {
                         let index =
                             model.command_history.len() + model.pinned_commands.len() - number - 1;
                         let completed_command = &model.command_history[index];
-                        model.set_current_view_from_command(completed_command.input.clone());
+                        model.set_current_view_from_command(
+                            completed_command.input.len() as u64,
+                            completed_command.input.clone(),
+                        );
                     };
                 }
                 model.mode = Mode::Idle;
@@ -428,6 +498,7 @@ impl Output {
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct CommandWithoutOutput {
     inside_quote: Option<char>,
+    cursor_position: u64,
     input: String,
 }
 
@@ -450,6 +521,14 @@ impl CurrentView {
             CurrentView::CommandWithoutOutput(command) => Some(command.input.as_str()),
             CurrentView::Output(_) => None,
             CurrentView::CommandWithOutput(command) => Some(command.input.as_str()),
+        }
+    }
+
+    pub fn cursor_position(&self) -> Option<u64> {
+        match self {
+            CurrentView::CommandWithoutOutput(command) => Some(command.cursor_position),
+            CurrentView::Output(_) => None,
+            CurrentView::CommandWithOutput(command) => Some(command.input.len() as u64),
         }
     }
 }
@@ -475,9 +554,10 @@ impl Model {
         self.mode == Mode::Quit
     }
 
-    fn set_current_view_from_command(&mut self, command: String) {
+    fn set_current_view_from_command(&mut self, cursor_position: u64, command: String) {
         self.current_command = CurrentView::CommandWithoutOutput(CommandWithoutOutput {
             inside_quote: None,
+            cursor_position,
             input: command,
         });
         self.command_history_index = self.command_history.len();
@@ -512,188 +592,5 @@ mod tui {
             disable_raw_mode().unwrap();
             original_hook(panic_info);
         }));
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub enum StringType<'a> {
-    Word(&'a str),
-    Whitespace(&'a str),
-    Tab(&'a str),
-    Newline(&'a str),
-}
-
-impl<'a> StringType<'a> {
-    pub fn as_str(&self) -> &str {
-        match self {
-            StringType::Word(s) => s,
-            StringType::Whitespace(s) => s,
-            StringType::Tab(s) => s,
-            StringType::Newline(s) => s,
-        }
-    }
-}
-
-fn split_string(input: &str) -> Vec<StringType> {
-    let mut result = Vec::new();
-    let mut chars = input.char_indices().peekable();
-    let mut last_index = 0;
-
-    while let Some((index, ch)) = chars.next() {
-        if ch.is_whitespace() {
-            // if there is a word before this whitespace, push it
-            if index != last_index {
-                result.push(StringType::Word(&input[last_index..index]));
-            }
-
-            match ch {
-                ' ' => {
-                    let whitespace_start = index;
-                    last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
-                    // consume continuous spaces
-                    while let Some(&(_, ' ')) = chars.peek() {
-                        chars.next();
-                        last_index = chars.peek().map_or(input.len(), |&(index, _)| index);
-                    }
-                    result.push(StringType::Whitespace(&input[whitespace_start..last_index]));
-                }
-                '\t' => {
-                    result.push(StringType::Tab(&input[index..index + 1]));
-                    last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
-                }
-                '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
-                    // for "\r\n", take both characters together as newline
-                    result.push(StringType::Newline(&input[index..index + 2]));
-                    chars.next();
-
-                    last_index = index + 2;
-                }
-                '\n' | '\r' => {
-                    // single newline character
-                    result.push(StringType::Newline(&input[index..index + 1]));
-                    last_index = index + 1;
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    // Push the remaining part of the string as a word, if any non-whitespace characters are trailing
-    if last_index != input.len() {
-        result.push(StringType::Word(&input[last_index..input.len()]));
-    }
-
-    result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_single_word() {
-        assert_eq!(split_string("world"), vec![StringType::Word("world")]);
-    }
-
-    #[test]
-    fn test_basic_split() {
-        assert_eq!(
-            split_string("hello world"),
-            vec![
-                StringType::Word("hello"),
-                StringType::Whitespace(" "),
-                StringType::Word("world")
-            ]
-        );
-    }
-
-    #[test]
-    fn test_multiple_spaces() {
-        assert_eq!(
-            split_string("hello  world"),
-            vec![
-                StringType::Word("hello"),
-                StringType::Whitespace("  "),
-                StringType::Word("world")
-            ]
-        );
-    }
-
-    #[test]
-    fn test_mixed_whitespace() {
-        assert_eq!(
-            split_string("hello  \n\t  world"),
-            vec![
-                StringType::Word("hello"),
-                StringType::Whitespace("  "),
-                StringType::Newline("\n"),
-                StringType::Tab("\t"),
-                StringType::Whitespace("  "),
-                StringType::Word("world")
-            ]
-        );
-    }
-
-    #[test]
-    fn test_start_end_with_spaces() {
-        assert_eq!(
-            split_string("  hello world  "),
-            vec![
-                StringType::Whitespace("  "),
-                StringType::Word("hello"),
-                StringType::Whitespace(" "),
-                StringType::Word("world"),
-                StringType::Whitespace("  "),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_empty_string() {
-        let empty: Vec<StringType> = Vec::new();
-        assert_eq!(split_string(""), empty);
-    }
-
-    #[test]
-    fn test_tabs_newlines_spaces() {
-        assert_eq!(
-            split_string("\t\tI love\r\nRust programming\rlanguage.  "),
-            vec![
-                StringType::Tab("\t"),
-                StringType::Tab("\t"),
-                StringType::Word("I"),
-                StringType::Whitespace(" "),
-                StringType::Word("love"),
-                StringType::Newline("\r\n"),
-                StringType::Word("Rust"),
-                StringType::Whitespace(" "),
-                StringType::Word("programming"),
-                StringType::Newline("\r"),
-                StringType::Word("language."),
-                StringType::Whitespace("  ")
-            ]
-        );
-    }
-
-    #[test]
-    fn test_tabs_newlines_spaces_2() {
-        assert_eq!(
-            split_string("\t\tI love\r\n   Rust programming\rlanguage.  "),
-            vec![
-                StringType::Tab("\t"),
-                StringType::Tab("\t"),
-                StringType::Word("I"),
-                StringType::Whitespace(" "),
-                StringType::Word("love"),
-                StringType::Newline("\r\n"),
-                StringType::Whitespace("   "),
-                StringType::Word("Rust"),
-                StringType::Whitespace(" "),
-                StringType::Word("programming"),
-                StringType::Newline("\r"),
-                StringType::Word("language."),
-                StringType::Whitespace("  ")
-            ]
-        );
     }
 }

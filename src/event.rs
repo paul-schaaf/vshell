@@ -12,6 +12,8 @@ pub enum Event {
     Enter,
     Up,
     Down,
+    Left,
+    Right,
     Character(char),
 }
 
@@ -80,6 +82,8 @@ pub fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
                     {
                         Some(Event::CtrlO)
                     }
+                    crossterm::event::KeyCode::Left => Some(Event::Left),
+                    crossterm::event::KeyCode::Right => Some(Event::Right),
                     crossterm::event::KeyCode::Backspace => Some(Event::Backspace),
                     crossterm::event::KeyCode::Esc => Some(Event::Esc),
                     crossterm::event::KeyCode::Enter => Some(Event::Enter),

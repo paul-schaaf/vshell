@@ -467,8 +467,6 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::CtrlC => {
                 model.mode = Mode::Quit;
             }
-            event::Event::CtrlH => todo!(),
-            event::Event::Backspace => todo!(),
             event::Event::Esc | event::Event::CtrlE => {
                 model.mode = Mode::Idle;
             }
@@ -525,19 +523,14 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 }
                 _ => unreachable!(),
             },
-            event::Event::Up => todo!(),
-            event::Event::Down => todo!(),
             event::Event::Character(c) => {
                 if c.is_alphabetic() {
                     hint.push(c);
                 }
             }
-            event::Event::CtrlV => todo!(),
-            event::Event::CtrlP => todo!(),
-            event::Event::CtrlS => todo!(),
-            event::Event::CtrlO => todo!(),
-            event::Event::Left => todo!(),
-            event::Event::Right => todo!(),
+            _ => {
+                // do nothing
+            }
         },
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
         Mode::Quit => unreachable!(),

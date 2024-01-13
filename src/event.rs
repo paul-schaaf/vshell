@@ -7,6 +7,8 @@ pub enum Event {
     CtrlP,
     CtrlS,
     CtrlO,
+    CtrlB,
+    CtrlA,
     Backspace,
     Esc,
     Enter,
@@ -81,6 +83,16 @@ pub fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
                         if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
                     {
                         Some(Event::CtrlO)
+                    }
+                    crossterm::event::KeyCode::Char('b')
+                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
+                    {
+                        Some(Event::CtrlB)
+                    }
+                    crossterm::event::KeyCode::Char('a')
+                        if key.modifiers == crossterm::event::KeyModifiers::CONTROL =>
+                    {
+                        Some(Event::CtrlA)
                     }
                     crossterm::event::KeyCode::Left => Some(Event::Left),
                     crossterm::event::KeyCode::Right => Some(Event::Right),

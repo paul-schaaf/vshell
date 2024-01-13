@@ -345,6 +345,8 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
         // ),
         Mode::Editing(hint) => format!("Input - Editing({})", hint),
         Mode::Selecting(number) => format!("Input - Selecting({})", number),
+        Mode::JumpingBefore(hint) => format!("Input - JumpingBefore({})", hint),
+        Mode::JumpingAfter(hint) => format!("Input - JumpingAfter({})", hint),
     };
     frame.render_widget(
         ratatui::widgets::Paragraph::new(heading.as_str())

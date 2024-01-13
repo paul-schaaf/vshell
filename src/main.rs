@@ -128,6 +128,18 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
         }
     }
 
+    fn base26_to_base10(input: &str) -> Option<u32> {
+        let mut result = 0;
+        for (i, c) in input.chars().rev().enumerate() {
+            let value = match c {
+                'a'..='z' => c as u32 - 'a' as u32,
+                _ => return None, // Invalid character
+            };
+            result += value * 26u32.pow(i as u32);
+        }
+        Some(result)
+    }
+
     if event == event::Event::CtrlC {
         model.mode = Mode::Quit;
         return;
@@ -462,27 +474,48 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     }
                 }
             }
+            event::Event::CtrlB => {
+                match &model.current_command {
+                    CurrentView::CommandWithoutOutput(c) => {
+                        if !c.input.is_empty() {
+                            model.mode = Mode::JumpingBefore(String::new());
+                        }
+                    }
+                    CurrentView::Output(_) => {
+                        // do nothing
+                    }
+                    CurrentView::CommandWithOutput(c) => {
+                        if !c.input.is_empty() {
+                            model.mode = Mode::JumpingBefore(String::new());
+                        }
+                        model.set_current_view_from_command(c.input.len() as u64, c.input.clone());
+                    }
+                }
+            }
+            event::Event::CtrlA => {
+                match &model.current_command {
+                    CurrentView::CommandWithoutOutput(c) => {
+                        if !c.input.is_empty() {
+                            model.mode = Mode::JumpingAfter(String::new());
+                        }
+                    }
+                    CurrentView::Output(_) => {
+                        // do nothing
+                    }
+                    CurrentView::CommandWithOutput(c) => {
+                        if !c.input.is_empty() {
+                            model.mode = Mode::JumpingAfter(String::new());
+                        }
+                    }
+                }
+            }
         },
         Mode::Editing(hint) => match event {
-            event::Event::CtrlC => {
-                model.mode = Mode::Quit;
-            }
             event::Event::Esc | event::Event::CtrlE => {
                 model.mode = Mode::Idle;
             }
             event::Event::Enter => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
-                    fn base26_to_base10(input: &str) -> Option<u32> {
-                        let mut result = 0;
-                        for (i, c) in input.chars().rev().enumerate() {
-                            let value = match c {
-                                'a'..='z' => c as u32 - 'a' as u32,
-                                _ => return None, // Invalid character
-                            };
-                            result += value * 26u32.pow(i as u32);
-                        }
-                        Some(result)
-                    }
                     let index = base26_to_base10(hint).unwrap_or_default();
                     model.mode = Mode::Idle;
                     let mut split_command = split_string(&command.input);
@@ -567,8 +600,95 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             event::Event::Backspace => {
                 number.pop();
             }
-            event::Event::Esc => {
+            event::Event::Esc | event::Event::CtrlS => {
                 model.mode = Mode::Idle;
+            }
+            _ => {
+                // do nothing
+            }
+        },
+        Mode::JumpingBefore(hint) => match event {
+            event::Event::Character(character) => {
+                if character.is_alphabetic() {
+                    hint.push(character)
+                }
+            }
+            event::Event::Backspace => {
+                hint.pop();
+            }
+            event::Event::Esc | event::Event::CtrlB => {
+                model.mode = Mode::Idle;
+            }
+            event::Event::Enter => {
+                let index = base26_to_base10(hint).unwrap_or_default();
+                model.mode = Mode::Idle;
+                let split_command = split_string(model.current_command.input_str().unwrap());
+                let mut current = 0;
+                let mut new_cursor_position = 0;
+                for element in split_command.iter() {
+                    match element {
+                        StringType::Word(w) => {
+                            if current == index {
+                                break;
+                            }
+                            current += 1;
+                            new_cursor_position += w.len() as u64;
+                        }
+                        StringType::Newline(c) | StringType::Tab(c) | StringType::Whitespace(c) => {
+                            new_cursor_position += c.len() as u64;
+                        }
+                    }
+                }
+                match &mut model.current_command {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        command.cursor_position = new_cursor_position;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => {
+                // do nothing
+            }
+        },
+        Mode::JumpingAfter(hint) => match event {
+            event::Event::Character(character) => {
+                if character.is_alphabetic() {
+                    hint.push(character)
+                }
+            }
+            event::Event::Backspace => {
+                hint.pop();
+            }
+            event::Event::Esc | event::Event::CtrlB => {
+                model.mode = Mode::Idle;
+            }
+            event::Event::Enter => {
+                let index = base26_to_base10(hint).unwrap_or_default();
+                model.mode = Mode::Idle;
+                let split_command = split_string(model.current_command.input_str().unwrap());
+                let mut current = 0;
+                let mut new_cursor_position = 0;
+                for element in split_command.iter() {
+                    match element {
+                        StringType::Word(w) => {
+                            if current == index {
+                                new_cursor_position += w.len() as u64;
+                                break;
+                            }
+                            current += 1;
+                            new_cursor_position += w.len() as u64;
+                        }
+                        StringType::Newline(c) | StringType::Tab(c) | StringType::Whitespace(c) => {
+                            new_cursor_position += c.len() as u64;
+                        }
+                    }
+                }
+                match &mut model.current_command {
+                    CurrentView::CommandWithoutOutput(command) => {
+                        command.cursor_position = new_cursor_position;
+                    }
+                    _ => unreachable!(),
+                }
             }
             _ => {
                 // do nothing
@@ -583,6 +703,8 @@ pub enum Mode {
     Idle,
     Editing(String),
     Selecting(String),
+    JumpingBefore(String),
+    JumpingAfter(String),
     Quit,
 }
 

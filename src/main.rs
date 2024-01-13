@@ -98,6 +98,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn base26_to_base10(input: &str) -> Option<u32> {
+    let mut result = 0;
+    for (i, c) in input.chars().rev().enumerate() {
+        let value = match c {
+            'a'..='z' => c as u32 - 'a' as u32,
+            _ => return None, // Invalid character
+        };
+        result += value * 26u32.pow(i as u32);
+    }
+    Some(result)
+}
+
 pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard) {
     fn has_open_quote(s: &str) -> Option<char> {
         let mut single_quote_open = false;
@@ -126,18 +138,6 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
         } else {
             None
         }
-    }
-
-    fn base26_to_base10(input: &str) -> Option<u32> {
-        let mut result = 0;
-        for (i, c) in input.chars().rev().enumerate() {
-            let value = match c {
-                'a'..='z' => c as u32 - 'a' as u32,
-                _ => return None, // Invalid character
-            };
-            result += value * 26u32.pow(i as u32);
-        }
-        Some(result)
     }
 
     if event == event::Event::CtrlC {
@@ -516,50 +516,122 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
             }
             event::Event::Enter => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
-                    let index = base26_to_base10(hint).unwrap_or_default();
-                    model.mode = Mode::Idle;
-                    let mut split_command = split_string(&command.input);
-                    let mut current = 0;
-                    let mut new_cursor_position = 0;
-                    let mut index_to_delete = None;
-                    for (real_index, element) in split_command.iter().enumerate() {
-                        match element {
-                            StringType::Word(w) => {
-                                if current == index {
-                                    index_to_delete = Some(real_index);
-                                    break;
+                    if hint.contains(',') {
+                        let indices = hint.split(',').collect::<Vec<&str>>();
+                        if indices.len() != 2 {
+                            return;
+                        }
+                        let beginning_index = base26_to_base10(indices[0]);
+                        if beginning_index.is_none() {
+                            return;
+                        }
+                        let end_index = base26_to_base10(indices[1]);
+                        if end_index.is_none() {
+                            return;
+                        }
+                        model.mode = Mode::Idle;
+                        let beginning_index = beginning_index.unwrap();
+                        let end_index = end_index.unwrap();
+                        if end_index < beginning_index {
+                            return;
+                        }
+                        let mut split_command = split_string(&command.input);
+                        let mut current = 0;
+                        let mut new_cursor_position = 0;
+                        let mut indices_to_delete = Vec::new();
+                        for (real_index, element) in split_command.iter().enumerate() {
+                            match element {
+                                StringType::Word(w) => {
+                                    if current == beginning_index || current == end_index {
+                                        indices_to_delete.push(real_index);
+                                    }
+                                    if current == end_index {
+                                        break;
+                                    }
+                                    current += 1;
+                                    if current <= beginning_index {
+                                        new_cursor_position += w.len() as u64;
+                                    }
                                 }
-                                current += 1;
-                                new_cursor_position += w.len() as u64;
-                            }
-                            StringType::Newline(c)
-                            | StringType::Tab(c)
-                            | StringType::Whitespace(c) => {
-                                new_cursor_position += c.len() as u64;
+                                StringType::Newline(c)
+                                | StringType::Tab(c)
+                                | StringType::Whitespace(c) => {
+                                    if current <= beginning_index {
+                                        new_cursor_position += c.len() as u64;
+                                    }
+                                }
                             }
                         }
-                    }
-                    if let Some(index_to_delete) = index_to_delete {
-                        split_command.remove(index_to_delete);
-
+                        if indices_to_delete.is_empty() {
+                            return;
+                        }
+                        split_command.drain(indices_to_delete[0]..=indices_to_delete[1]);
+                        let new_command = split_command
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<&str>>()
+                            .join("");
                         model.current_command =
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                inside_quote: command.inside_quote,
+                                inside_quote: has_open_quote(&new_command),
                                 cursor_position: new_cursor_position,
-                                input: split_command
-                                    .iter()
-                                    .map(|s| s.as_str())
-                                    .collect::<Vec<&str>>()
-                                    .join(""),
+                                input: new_command,
                             });
+                    } else {
+                        let index = base26_to_base10(hint);
+                        if index.is_none() {
+                            return;
+                        }
+                        let index = index.unwrap();
+                        model.mode = Mode::Idle;
+                        let mut split_command = split_string(&command.input);
+                        let mut current = 0;
+                        let mut new_cursor_position = 0;
+                        let mut index_to_delete = None;
+                        for (real_index, element) in split_command.iter().enumerate() {
+                            match element {
+                                StringType::Word(w) => {
+                                    if current == index {
+                                        index_to_delete = Some(real_index);
+                                        break;
+                                    }
+                                    current += 1;
+                                    new_cursor_position += w.len() as u64;
+                                }
+                                StringType::Newline(c)
+                                | StringType::Tab(c)
+                                | StringType::Whitespace(c) => {
+                                    new_cursor_position += c.len() as u64;
+                                }
+                            }
+                        }
+                        if let Some(index_to_delete) = index_to_delete {
+                            split_command.remove(index_to_delete);
+
+                            let new_command = split_command
+                                .iter()
+                                .map(|s| s.as_str())
+                                .collect::<Vec<&str>>()
+                                .join("");
+
+                            model.current_command =
+                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                    inside_quote: has_open_quote(&new_command),
+                                    cursor_position: new_cursor_position,
+                                    input: new_command,
+                                });
+                        }
                     }
                 }
                 _ => unreachable!(),
             },
             event::Event::Character(c) => {
-                if c.is_alphabetic() {
+                if c.is_alphabetic() || c == ',' {
                     hint.push(c);
                 }
+            }
+            event::Event::Backspace => {
+                hint.pop();
             }
             _ => {
                 // do nothing
@@ -835,5 +907,14 @@ mod tui {
             disable_raw_mode().unwrap();
             original_hook(panic_info);
         }));
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_base26_to_base10() {
+        assert_eq!(base26_to_base10("a"), Some(0))
     }
 }

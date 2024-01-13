@@ -578,6 +578,9 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                 input: new_command,
                             });
                     } else {
+                        if hint.is_empty() {
+                            return;
+                        }
                         let index = base26_to_base10(hint);
                         if index.is_none() {
                             return;

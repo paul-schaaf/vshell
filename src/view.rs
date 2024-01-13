@@ -42,35 +42,35 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
     render_output(frame, model, outer_layout[1]);
     render_input(frame, model, left_layout[0]);
 
-    let amount_pinned_commands: usize = model.pinned_commands.len();
     let pinned_commands = model
         .pinned_commands
         .iter()
         .enumerate()
         .map(|(index, command)| format!("{}: {}", index, command.input))
-        .collect::<Vec<String>>()
-        .join("\n");
+        .collect::<Vec<String>>();
 
-    if !pinned_commands.is_empty() {
+    for (index, command) in pinned_commands.iter().enumerate() {
         frame.render_widget(
-            Paragraph::new(pinned_commands.as_str())
+            Paragraph::new(command.as_str())
                 .block(Block::new().white().on_black())
                 .wrap(Wrap { trim: false }),
             Rect {
                 x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1,
+                y: left_layout[1].y + 1 + index as u16,
                 width: left_layout[1].width - 2,
-                height: left_layout[1].height - 2,
+                height: 1,
             },
         );
+    }
 
+    if !pinned_commands.is_empty() {
         frame.render_widget(
             ratatui::widgets::Paragraph::new("-".repeat(left_layout[1].width as usize - 2))
                 .block(Block::new().white().on_black().bold())
                 .wrap(Wrap { trim: false }),
             Rect {
                 x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1 + amount_pinned_commands as u16,
+                y: left_layout[1].y + 1 + pinned_commands.len() as u16,
                 width: left_layout[1].width - 2,
                 height: 1,
             },
@@ -83,9 +83,7 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
             .iter()
             .rev()
             .enumerate()
-            .map(|(index, command)| {
-                format!("{}: {}", index + amount_pinned_commands, command.input)
-            })
+            .map(|(index, command)| format!("{}: {}", index + pinned_commands.len(), command.input))
             .collect::<Vec<String>>()
             .join("\n");
 
@@ -95,7 +93,7 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
                 .wrap(Wrap { trim: false }),
             Rect {
                 x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1 + amount_pinned_commands as u16 + {
+                y: left_layout[1].y + 1 + pinned_commands.len() as u16 + {
                     if pinned_commands.is_empty() {
                         0
                     } else {
@@ -103,7 +101,7 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
                     }
                 },
                 width: left_layout[1].width - 2,
-                height: left_layout[1].height - 2 - amount_pinned_commands as u16 - {
+                height: left_layout[1].height - 2 - pinned_commands.len() as u16 - {
                     if pinned_commands.is_empty() {
                         0
                     } else {

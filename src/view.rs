@@ -249,16 +249,11 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                     x += string_to_render.len() as u16;
 
                     if let Some(cursor_position_inside_content) = cursor_position_inside_content {
-                        let space_left = layout.width - x - 1;
+                        let new_x =
+                            location.x + cursor_position_inside_content as u16 + hint.len() as u16;
                         let cursor_location = Rect {
-                            x: if space_left == 0 {
-                                1
-                            } else {
-                                location.x
-                                    + cursor_position_inside_content as u16
-                                    + hint.len() as u16
-                            },
-                            y: if space_left == 0 {
+                            x: if new_x == layout.width - 1 { 1 } else { new_x },
+                            y: if new_x == layout.width - 1 {
                                 location.y + 1
                             } else {
                                 location.y

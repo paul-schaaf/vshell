@@ -20,18 +20,13 @@ pub enum Event {
 }
 
 pub fn wait_for_event() -> Event {
-    let mut event = None;
-    while event.is_none() {
-        // TODO: remove unwrap
-        while !crossterm::event::poll(std::time::Duration::from_secs(10)).unwrap() {
-            // do nothing
+    loop {
+        if let Ok(crossterm_event) = crossterm::event::read() {
+            if let Some(event) = create_event(crossterm_event) {
+                return event;
+            }
         }
-
-        let crossterm_event = crossterm::event::read().unwrap();
-        event = create_event(crossterm_event);
     }
-    // SAFETY: safe because while loop existed only when event was Some
-    event.unwrap()
 }
 
 pub fn get_event() -> Option<Event> {

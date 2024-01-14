@@ -93,21 +93,15 @@ pub fn view(model: &Model, frame: &mut ratatui::Frame) {
                 .wrap(Wrap { trim: false }),
             Rect {
                 x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1 + pinned_commands.len() as u16 + {
-                    if pinned_commands.is_empty() {
-                        0
-                    } else {
-                        1
-                    }
-                },
+                y: left_layout[1].y
+                    + 1
+                    + pinned_commands.len() as u16
+                    + if pinned_commands.is_empty() { 0 } else { 1 },
                 width: left_layout[1].width - 2,
-                height: left_layout[1].height - 2 - pinned_commands.len() as u16 - {
-                    if pinned_commands.is_empty() {
-                        0
-                    } else {
-                        1
-                    }
-                },
+                height: left_layout[1].height
+                    - 2
+                    - pinned_commands.len() as u16
+                    - if pinned_commands.is_empty() { 0 } else { 1 },
             },
         );
     }

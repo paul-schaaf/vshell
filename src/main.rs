@@ -78,7 +78,7 @@ fn split_string(input: &str) -> Vec<StringType> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
-    let mut clipboard = Clipboard::new().unwrap();
+    let mut clipboard = Clipboard::new()?;
     let mut terminal = tui::init_terminal()?;
     let mut model = Model::default();
 
@@ -86,12 +86,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         terminal.draw(|frame| view::view(&model, frame))?;
 
         let event = event::wait_for_event();
-        update(&mut model, event, &mut clipboard);
+        update(&mut model, event, &mut clipboard)?;
         if model.should_quit() {
             break;
         }
-        while let Some(next_event) = event::get_event() {
-            update(&mut model, next_event, &mut clipboard);
+        while let Some(next_event) = event::get_event()? {
+            update(&mut model, next_event, &mut clipboard)?;
         }
     }
 
@@ -99,19 +99,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn base26_to_base10(input: &str) -> Option<u32> {
+fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
     let mut result = 0;
     for (i, c) in input.chars().rev().enumerate() {
         let value = match c {
             'a'..='z' => c as u32 - 'a' as u32,
-            _ => return None, // Invalid character
+            _ => return Err("Invalid Character"), // Invalid character
         };
         result += value * 26u32.pow(i as u32);
     }
-    Some(result)
+    Ok(result)
 }
 
-pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard) {
+pub fn update(
+    model: &mut Model,
+    event: event::Event,
+    clipboard: &mut Clipboard,
+) -> Result<(), Box<dyn std::error::Error>> {
     fn has_open_quote(s: &str) -> Option<char> {
         let mut single_quote_open = false;
         let mut double_quote_open = false;
@@ -143,13 +147,14 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
 
     if event == event::Event::CtrlC {
         model.mode = Mode::Quit;
-        return;
+        return Ok(());
     }
 
     match &mut model.mode {
         Mode::Idle => match event {
             event::Event::CtrlC => {
                 model.mode = Mode::Quit;
+                Ok(())
             }
             event::Event::CtrlE => {
                 match &model.current_command {
@@ -157,6 +162,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         if !command.input.is_empty() {
                             model.mode = Mode::Editing(String::new());
                         }
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(command) => {
                         model.mode = Mode::Editing(String::new());
@@ -164,9 +170,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             command.input.len() as u64,
                             command.input.clone(),
                         );
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
                 }
             }
@@ -174,7 +182,8 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 model.config.hint_state = match model.config.hint_state {
                     HintState::ShowHints => HintState::HideHints,
                     HintState::HideHints => HintState::ShowHints,
-                }
+                };
+                Ok(())
             }
             event::Event::Backspace => {
                 match &mut model.current_command {
@@ -205,26 +214,28 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         // do nothing
                     }
                 };
+                Ok(())
             }
             event::Event::Esc => {
                 // do nothing
+                Ok(())
             }
             event::Event::Enter => {
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
                         if command.input.is_empty() {
-                            return;
+                            return Ok(());
                         }
                         if command.inside_quote.is_some() {
                             command.input.push('\n');
                             command.cursor_position += 1;
-                            return;
+                            return Ok(());
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
                         if command.input.ends_with('\\') {
                             command.input.push('\n');
                             command.cursor_position += 1;
-                            return;
+                            return Ok(());
                         }
 
                         let executed_command = std::process::Command::new("sh")
@@ -284,6 +295,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     }
                 };
                 model.command_history_index = model.command_history.len();
+                Ok(())
             }
             event::Event::Up => {
                 if model.command_history_index > 0 {
@@ -292,6 +304,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     model.current_command =
                         CurrentView::CommandWithOutput(completed_command.clone());
                 }
+                Ok(())
             }
             event::Event::Down => {
                 if !model.command_history.is_empty()
@@ -304,9 +317,9 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 } else {
                     model.set_current_view_from_command(0, String::new());
                 }
+                Ok(())
             }
             event::Event::Character(c) => {
-                // TODO: escaping characters
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
                         command.input.insert(command.cursor_position as usize, c);
@@ -341,10 +354,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         model.set_current_view_from_command(1, String::from(c));
                     }
                 };
+                Ok(())
             }
             event::Event::CtrlV => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
-                    let text_to_insert = clipboard.get_text().unwrap();
+                    let text_to_insert = clipboard.get_text()?;
                     let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
@@ -352,9 +366,10 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             input: new_command,
                             cursor_position: command.cursor_position + text_to_insert.len() as u64,
                         });
+                    Ok(())
                 }
                 CurrentView::CommandWithOutput(command) => {
-                    let text_to_insert = clipboard.get_text().unwrap();
+                    let text_to_insert = clipboard.get_text()?;
                     let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
@@ -363,9 +378,10 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             cursor_position: command.input.len() as u64
                                 + text_to_insert.len() as u64,
                         });
+                    Ok(())
                 }
                 CurrentView::Output(_) => {
-                    let new_command = clipboard.get_text().unwrap();
+                    let new_command = clipboard.get_text()?;
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
                             inside_quote: has_open_quote(new_command.as_str()),
@@ -373,12 +389,13 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             input: new_command,
                         });
                     model.command_history_index = model.command_history.len();
+                    Ok(())
                 }
             },
             event::Event::CtrlP => match &model.current_command {
                 CurrentView::CommandWithoutOutput(c) => {
                     if c.input.is_empty() {
-                        return;
+                        return Ok(());
                     }
                     let position = model
                         .pinned_commands
@@ -387,18 +404,23 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         .position(|past_command| past_command == c.input);
                     if let Some(position) = position {
                         model.pinned_commands.remove(position);
+                        Ok(())
                     } else {
                         model.pinned_commands.push(CommandWithoutOutput {
                             inside_quote: c.inside_quote,
                             input: c.input.clone(),
                             cursor_position: c.cursor_position,
-                        })
+                        });
+                        Ok(())
                     }
                 }
-                CurrentView::Output(_) => {}
+                CurrentView::Output(_) => {
+                    // do nothing
+                    Ok(())
+                }
                 CurrentView::CommandWithOutput(c) => {
                     if c.input.is_empty() {
-                        return;
+                        return Ok(());
                     }
                     let position = model
                         .pinned_commands
@@ -407,28 +429,34 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         .position(|past_command| past_command == c.input);
                     if let Some(position) = position {
                         model.pinned_commands.remove(position);
+                        Ok(())
                     } else {
                         model.pinned_commands.push(CommandWithoutOutput {
                             inside_quote: None,
                             input: c.input.clone(),
                             cursor_position: c.input.len() as u64,
-                        })
+                        });
+                        Ok(())
                     }
                 }
             },
             event::Event::CtrlS => {
                 model.mode = Mode::Selecting(String::new());
+                Ok(())
             }
             event::Event::CtrlO => {
                 match model.current_command {
                     CurrentView::CommandWithoutOutput(_) => {
                         // do nothing
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(ref command) => {
-                        clipboard.set_text(command.output.as_str()).unwrap();
+                        clipboard.set_text(command.output.as_str())?;
+                        Ok(())
                     }
                     CurrentView::Output(ref command) => {
-                        clipboard.set_text(command.as_str()).unwrap();
+                        clipboard.set_text(command.as_str())?;
+                        Ok(())
                     }
                 }
             }
@@ -438,6 +466,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         if command.cursor_position > 0 {
                             command.cursor_position -= 1;
                         }
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(command) => {
                         model.current_command =
@@ -449,9 +478,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                 input: command.input.clone(),
                             });
                         model.command_history_index = model.command_history.len();
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
                 }
             }
@@ -461,6 +492,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         if command.cursor_position < command.input.len() as u64 {
                             command.cursor_position += 1;
                         }
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(command) => {
                         model.current_command =
@@ -470,9 +502,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                 input: command.input.clone(),
                             });
                         model.command_history_index = model.command_history.len();
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
                 }
             }
@@ -482,15 +516,18 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         if !c.input.is_empty() {
                             model.mode = Mode::JumpingBefore(String::new());
                         }
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(c) => {
                         if !c.input.is_empty() {
                             model.mode = Mode::JumpingBefore(String::new());
                         }
                         model.set_current_view_from_command(c.input.len() as u64, c.input.clone());
+                        Ok(())
                     }
                 }
             }
@@ -500,14 +537,17 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         if !c.input.is_empty() {
                             model.mode = Mode::JumpingAfter(String::new());
                         }
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
                     CurrentView::CommandWithOutput(c) => {
                         if !c.input.is_empty() {
                             model.mode = Mode::JumpingAfter(String::new());
                         }
+                        Ok(())
                     }
                 }
             }
@@ -515,27 +555,30 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
         Mode::Editing(hint) => match event {
             event::Event::Esc | event::Event::CtrlE => {
                 model.mode = Mode::Idle;
+                Ok(())
             }
             event::Event::Enter => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
                     if hint.contains(',') {
                         let indices = hint.split(',').collect::<Vec<&str>>();
                         if indices.len() != 2 {
-                            return;
+                            return Ok(());
                         }
                         let beginning_index = base26_to_base10(indices[0]);
-                        if beginning_index.is_none() {
-                            return;
+                        if beginning_index.is_err() {
+                            return Ok(());
                         }
                         let end_index = base26_to_base10(indices[1]);
-                        if end_index.is_none() {
-                            return;
+                        if end_index.is_err() {
+                            return Ok(());
                         }
                         model.mode = Mode::Idle;
+                        // SAFETY: just checked for none
                         let beginning_index = beginning_index.unwrap();
+                        // SAFETY: just checked for none
                         let end_index = end_index.unwrap();
                         if end_index < beginning_index {
-                            return;
+                            return Ok(());
                         }
                         let mut split_command = split_string(&command.input);
                         let mut current = 0;
@@ -568,7 +611,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             }
                         }
                         if indices_to_delete.is_empty() {
-                            return;
+                            return Ok(());
                         }
                         split_command.drain(indices_to_delete[0]..=indices_to_delete[1]);
                         let new_command = split_command
@@ -582,14 +625,16 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                 cursor_position: new_cursor_position,
                                 input: new_command,
                             });
+                        Ok(())
                     } else {
                         if hint.is_empty() {
-                            return;
+                            return Ok(());
                         }
                         let index = base26_to_base10(hint);
-                        if index.is_none() {
-                            return;
+                        if index.is_err() {
+                            return Ok(());
                         }
+                        // SAFETY: just checked for err
                         let index = index.unwrap();
                         model.mode = Mode::Idle;
                         let mut split_command = split_string(&command.input);
@@ -630,6 +675,7 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                     input: new_command,
                                 });
                         }
+                        Ok(())
                     }
                 }
                 _ => unreachable!(),
@@ -638,12 +684,15 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 if c.is_alphabetic() || c == ',' {
                     hint.push(c);
                 }
+                Ok(())
             }
             event::Event::Backspace => {
                 hint.pop();
+                Ok(())
             }
             _ => {
                 // do nothing
+                Ok(())
             }
         },
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
@@ -653,9 +702,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 if character.is_ascii_digit() {
                     number.push(character)
                 }
+                Ok(())
             }
             event::Event::Enter => {
-                let number = number.parse::<usize>().unwrap();
+                // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
+                let number = number.parse::<usize>()?;
                 if number < model.command_history.len() + model.pinned_commands.len() {
                     if number < model.pinned_commands.len() {
                         let completed_command = &model.pinned_commands[number];
@@ -677,15 +728,19 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     };
                 }
                 model.mode = Mode::Idle;
+                Ok(())
             }
             event::Event::Backspace => {
                 number.pop();
+                Ok(())
             }
             event::Event::Esc | event::Event::CtrlS => {
                 model.mode = Mode::Idle;
+                Ok(())
             }
             _ => {
                 // do nothing
+                Ok(())
             }
         },
         Mode::JumpingBefore(hint) => match event {
@@ -693,12 +748,15 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 if character.is_alphabetic() {
                     hint.push(character)
                 }
+                Ok(())
             }
             event::Event::Backspace => {
                 hint.pop();
+                Ok(())
             }
             event::Event::Esc | event::Event::CtrlB => {
                 model.mode = Mode::Idle;
+                Ok(())
             }
             event::Event::Enter => {
                 if hint.is_empty() {
@@ -709,10 +767,12 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         _ => unreachable!(),
                     }
                     model.mode = Mode::Idle;
-                    return;
+                    return Ok(());
                 }
-                let index = base26_to_base10(hint).unwrap_or_default();
+                // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
+                let index = base26_to_base10(hint)?;
                 model.mode = Mode::Idle;
+                // SAFETY: Jumping Modes can only be entered if command has an input string
                 let split_command = split_string(model.current_command.input_str().unwrap());
                 let mut current = 0;
                 let mut new_cursor_position = 0;
@@ -736,12 +796,14 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
                         command.cursor_position = new_cursor_position;
+                        Ok(())
                     }
                     _ => unreachable!(),
                 }
             }
             _ => {
                 // do nothing
+                Ok(())
             }
         },
         Mode::JumpingAfter(hint) => match event {
@@ -749,12 +811,15 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 if character.is_alphabetic() {
                     hint.push(character)
                 }
+                Ok(())
             }
             event::Event::Backspace => {
                 hint.pop();
+                Ok(())
             }
             event::Event::Esc | event::Event::CtrlB => {
                 model.mode = Mode::Idle;
+                Ok(())
             }
             event::Event::Enter => {
                 if hint.is_empty() {
@@ -765,10 +830,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                         _ => unreachable!(),
                     }
                     model.mode = Mode::Idle;
-                    return;
+                    return Ok(());
                 }
-                let index = base26_to_base10(hint).unwrap_or_default();
+                let index = base26_to_base10(hint)?;
                 model.mode = Mode::Idle;
+                // SAFETY: Jumping Modes can only be entered if command has an input string
                 let split_command = split_string(model.current_command.input_str().unwrap());
                 let mut current = 0;
                 let mut new_cursor_position = 0;
@@ -796,9 +862,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                     }
                     _ => unreachable!(),
                 }
+                Ok(())
             }
             _ => {
                 // do nothing
+                Ok(())
             }
         },
     }
@@ -950,6 +1018,6 @@ mod test {
     use super::*;
     #[test]
     fn test_base26_to_base10() {
-        assert_eq!(base26_to_base10("a"), Some(0))
+        assert_eq!(base26_to_base10("a"), Ok(0))
     }
 }

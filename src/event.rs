@@ -29,13 +29,13 @@ pub fn wait_for_event() -> Event {
     }
 }
 
-pub fn get_event() -> Option<Event> {
+pub fn get_event() -> Result<Option<Event>, Box<dyn std::error::Error>> {
     // TODO: remove unwrap
-    if crossterm::event::poll(std::time::Duration::from_secs(0)).unwrap() {
+    if crossterm::event::poll(std::time::Duration::from_secs(0))? {
         // TODO: remove unwrap
-        create_event(crossterm::event::read().unwrap())
+        Ok(create_event(crossterm::event::read()?))
     } else {
-        None
+        Ok(None)
     }
 }
 

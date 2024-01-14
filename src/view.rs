@@ -151,7 +151,6 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
     }
 
     for (word_index, word) in string_that_was_split.iter().enumerate() {
-        // TODO: handle strings that are longer than the width of the terminal
         match word {
             StringType::Word(content) => {
                 let mut cursor_position_inside_content = None;
@@ -340,6 +339,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                         && x + TAB_STRING.len() as u16 > layout.width - 1)
                     {
                         let cursor_location = Rect {
+                            // SAFETY: new_cursor_position is always Some if cursor_position_inside_content is Some
                             x: new_cursor_position.unwrap().0,
                             y: new_cursor_position.unwrap().1,
                             width: 1,

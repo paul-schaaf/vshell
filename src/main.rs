@@ -696,6 +696,16 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 model.mode = Mode::Idle;
             }
             event::Event::Enter => {
+                if hint.is_empty() {
+                    match &mut model.current_command {
+                        CurrentView::CommandWithoutOutput(command) => {
+                            command.cursor_position = command.input.len() as u64;
+                        }
+                        _ => unreachable!(),
+                    }
+                    model.mode = Mode::Idle;
+                    return;
+                }
                 let index = base26_to_base10(hint).unwrap_or_default();
                 model.mode = Mode::Idle;
                 let split_command = split_string(model.current_command.input_str().unwrap());
@@ -739,6 +749,16 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 model.mode = Mode::Idle;
             }
             event::Event::Enter => {
+                if hint.is_empty() {
+                    match &mut model.current_command {
+                        CurrentView::CommandWithoutOutput(command) => {
+                            command.cursor_position = command.input.len() as u64;
+                        }
+                        _ => unreachable!(),
+                    }
+                    model.mode = Mode::Idle;
+                    return;
+                }
                 let index = base26_to_base10(hint).unwrap_or_default();
                 model.mode = Mode::Idle;
                 let split_command = split_string(model.current_command.input_str().unwrap());

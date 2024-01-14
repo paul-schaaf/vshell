@@ -135,321 +135,293 @@ fn base10_to_base26(mut num: u32) -> String {
 
 fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
     let writable_width = layout.width - 2;
-    match model.config.hint_state {
-        crate::HintState::ShowHints => {
-            let mut x = 1;
-            let mut y = 1;
-            let mut index = 0;
-            let mut current_index_in_original_string: u64 = 0;
+    let mut x = 1;
+    let mut y = 1;
+    let mut index = 0;
+    let mut current_index_in_original_string: u64 = 0;
 
-            let string_that_was_split =
-                split_string(model.current_command.input_str().unwrap_or_default());
+    let string_that_was_split = split_string(model.current_command.input_str().unwrap_or_default());
 
-            if string_that_was_split.is_empty() {
-                frame.render_widget(
-                    Block::new().on_green(),
-                    Rect {
-                        x: 1,
-                        y: 1,
-                        width: 1,
-                        height: 1,
-                    },
-                );
-            }
+    if string_that_was_split.is_empty() {
+        frame.render_widget(
+            Block::new().on_green(),
+            Rect {
+                x: 1,
+                y: 1,
+                width: 1,
+                height: 1,
+            },
+        );
+    }
 
-            for word in string_that_was_split {
-                // TODO: handle strings that are longer than the width of the terminal
-                match word {
-                    StringType::Word(content) => {
-                        let mut cursor_position_inside_content = None;
-                        if let Some(cursor_position) = model.current_command.cursor_position() {
-                            if cursor_position
-                                <= current_index_in_original_string + content.len() as u64
-                                && cursor_position >= current_index_in_original_string
-                            {
-                                cursor_position_inside_content =
-                                    Some(cursor_position - current_index_in_original_string);
-                            }
+    for word in string_that_was_split {
+        // TODO: handle strings that are longer than the width of the terminal
+        match word {
+            StringType::Word(content) => {
+                let mut cursor_position_inside_content = None;
+                if let Some(cursor_position) = model.current_command.cursor_position() {
+                    if cursor_position <= current_index_in_original_string + content.len() as u64
+                        && cursor_position >= current_index_in_original_string
+                    {
+                        cursor_position_inside_content =
+                            Some(cursor_position - current_index_in_original_string);
+                    }
+                }
+                current_index_in_original_string += content.len() as u64;
+                let hint = match model.config.hint_state {
+                    crate::HintState::ShowHints => {
+                        format!("{}:", base10_to_base26(index as u32))
+                    }
+                    crate::HintState::HideHints => String::new(),
+                };
+
+                let mut string_to_render = format!("{}{}", hint, content);
+                if x + 1 + string_to_render.len() as u16 > layout.width {
+                    let mut character_amount = 0;
+                    let mut space_left = layout.width - x - 1;
+                    // frame.render_widget(
+                    //     Paragraph::new(space_left.to_string())
+                    //         .block(Block::new().white().on_red())
+                    //         .wrap(Wrap { trim: false }),
+                    //     layout,
+                    // );
+                    let mut should_quit = false;
+                    while !should_quit {
+                        if space_left == 0 {
+                            x = 1;
+                            y += 1;
+                            space_left = writable_width;
                         }
-                        current_index_in_original_string += content.len() as u64;
-
-                        let s = base10_to_base26(index as u32);
-                        let hint = format!("{}:", s);
-                        let mut string_to_render = format!("{}{}", hint, content);
-                        if x + 1 + string_to_render.len() as u16 > layout.width {
-                            let mut character_amount = 0;
-                            let mut space_left = layout.width - x - 1;
-                            // frame.render_widget(
-                            //     Paragraph::new(space_left.to_string())
-                            //         .block(Block::new().white().on_red())
-                            //         .wrap(Wrap { trim: false }),
-                            //     layout,
-                            // );
-                            let mut should_quit = false;
-                            while !should_quit {
-                                if space_left == 0 {
-                                    x = 1;
-                                    y += 1;
-                                    space_left = writable_width;
-                                }
-                                let current_string = if string_to_render.len() as u16 <= space_left
-                                {
-                                    should_quit = true;
-                                    string_to_render.clone()
-                                } else {
-                                    let mut c = string_to_render.split_off(space_left as usize);
-                                    std::mem::swap(&mut c, &mut string_to_render);
-                                    c
-                                };
-
-                                space_left = layout.width - x - 1 - current_string.len() as u16;
-
-                                let location = Rect {
-                                    x,
-                                    y,
-                                    width: current_string.len() as u16,
-                                    height: 1,
-                                };
-
-                                frame.render_widget(
-                                    Paragraph::new(current_string.as_str())
-                                        .block(Block::new().white().on_black())
-                                        .wrap(Wrap { trim: false }),
-                                    location,
-                                );
-
-                                if let Some(cursor_position_inside_content) =
-                                    cursor_position_inside_content
-                                {
-                                    if cursor_position_inside_content + hint.len() as u64
-                                        >= character_amount
-                                        && cursor_position_inside_content + hint.len() as u64
-                                            <= character_amount + current_string.len() as u64
-                                    {
-                                        let new_x = x
-                                            + cursor_position_inside_content as u16
-                                            + hint.len() as u16
-                                            - character_amount as u16;
-                                        let cursor_location = Rect {
-                                            x: if new_x == layout.width - 1 { 1 } else { new_x },
-                                            y: if new_x == layout.width - 1 { y + 1 } else { y },
-                                            width: 1,
-                                            height: 1,
-                                        };
-                                        frame.render_widget(
-                                            Block::new().on_green(),
-                                            cursor_location,
-                                        );
-                                    }
-                                }
-                                character_amount += current_string.len() as u64;
-                                x += current_string.len() as u16;
-                            }
+                        let current_string = if string_to_render.len() as u16 <= space_left {
+                            should_quit = true;
+                            string_to_render.clone()
                         } else {
-                            let location = Rect {
-                                x,
-                                y,
-                                width: string_to_render.len() as u16,
-                                height: 1,
-                            };
-                            frame.render_widget(
-                                Paragraph::new(string_to_render.as_str())
-                                    .block(Block::new().white().on_black())
-                                    .wrap(Wrap { trim: false }),
-                                location,
-                            );
-                            x += string_to_render.len() as u16;
+                            let mut c = string_to_render.split_off(space_left as usize);
+                            std::mem::swap(&mut c, &mut string_to_render);
+                            c
+                        };
 
-                            if let Some(cursor_position_inside_content) =
-                                cursor_position_inside_content
+                        space_left = layout.width - x - 1 - current_string.len() as u16;
+
+                        let location = Rect {
+                            x,
+                            y,
+                            width: current_string.len() as u16,
+                            height: 1,
+                        };
+
+                        frame.render_widget(
+                            Paragraph::new(current_string.as_str())
+                                .block(Block::new().white().on_black())
+                                .wrap(Wrap { trim: false }),
+                            location,
+                        );
+
+                        if let Some(cursor_position_inside_content) = cursor_position_inside_content
+                        {
+                            if cursor_position_inside_content + hint.len() as u64
+                                >= character_amount
+                                && cursor_position_inside_content + hint.len() as u64
+                                    <= character_amount + current_string.len() as u64
                             {
-                                let space_left = layout.width - x - 1;
+                                let new_x =
+                                    x + cursor_position_inside_content as u16 + hint.len() as u16
+                                        - character_amount as u16;
                                 let cursor_location = Rect {
-                                    x: if space_left == 0 {
-                                        1
-                                    } else {
-                                        location.x
-                                            + cursor_position_inside_content as u16
-                                            + s.len() as u16
-                                            + 1
-                                    },
-                                    y: if space_left == 0 {
-                                        location.y + 1
-                                    } else {
-                                        location.y
-                                    },
+                                    x: if new_x == layout.width - 1 { 1 } else { new_x },
+                                    y: if new_x == layout.width - 1 { y + 1 } else { y },
                                     width: 1,
                                     height: 1,
                                 };
-
-                                if cursor_position_inside_content == content.len() as u64 {
-                                    frame.render_widget(Block::new().on_green(), cursor_location);
-                                } else {
-                                    frame.render_widget(
-                                        Paragraph::new(
-                                            &content[cursor_position_inside_content as usize
-                                                ..=cursor_position_inside_content as usize],
-                                        )
-                                        .block(Block::new().white().on_green()),
-                                        cursor_location,
-                                    );
-                                }
+                                frame.render_widget(Block::new().on_green(), cursor_location);
                             }
                         }
-
-                        index += 1;
+                        character_amount += current_string.len() as u64;
+                        x += current_string.len() as u16;
                     }
-                    StringType::Whitespace(content) => {
-                        let mut cursor_position_inside_content = None;
-                        if let Some(cursor_position) = model.current_command.cursor_position() {
-                            if cursor_position
-                                <= current_index_in_original_string + content.len() as u64
-                                && cursor_position >= current_index_in_original_string
-                            {
-                                cursor_position_inside_content =
-                                    Some(cursor_position - current_index_in_original_string);
-                            }
+                } else {
+                    let location = Rect {
+                        x,
+                        y,
+                        width: string_to_render.len() as u16,
+                        height: 1,
+                    };
+                    frame.render_widget(
+                        Paragraph::new(string_to_render.as_str())
+                            .block(Block::new().white().on_black())
+                            .wrap(Wrap { trim: false }),
+                        location,
+                    );
+                    x += string_to_render.len() as u16;
+
+                    if let Some(cursor_position_inside_content) = cursor_position_inside_content {
+                        let space_left = layout.width - x - 1;
+                        let cursor_location = Rect {
+                            x: if space_left == 0 {
+                                1
+                            } else {
+                                location.x
+                                    + cursor_position_inside_content as u16
+                                    + hint.len() as u16
+                            },
+                            y: if space_left == 0 {
+                                location.y + 1
+                            } else {
+                                location.y
+                            },
+                            width: 1,
+                            height: 1,
+                        };
+
+                        if cursor_position_inside_content == content.len() as u64 {
+                            frame.render_widget(Block::new().on_green(), cursor_location);
+                        } else {
+                            frame.render_widget(
+                                Paragraph::new(
+                                    &content[cursor_position_inside_content as usize
+                                        ..=cursor_position_inside_content as usize],
+                                )
+                                .block(Block::new().white().on_green()),
+                                cursor_location,
+                            );
                         }
-                        current_index_in_original_string += content.len() as u64;
+                    }
+                }
 
-                        if let Some(mut cursor_position_inside_content) =
-                            cursor_position_inside_content
-                        {
-                            // let old = cursor_position_inside_content;
-                            let mut new_cursor_position = None;
+                index += 1;
+            }
+            StringType::Whitespace(content) => {
+                let mut cursor_position_inside_content = None;
+                if let Some(cursor_position) = model.current_command.cursor_position() {
+                    if cursor_position <= current_index_in_original_string + content.len() as u64
+                        && cursor_position >= current_index_in_original_string
+                    {
+                        cursor_position_inside_content =
+                            Some(cursor_position - current_index_in_original_string);
+                    }
+                }
+                current_index_in_original_string += content.len() as u64;
 
-                            if cursor_position_inside_content == 0 {
+                if let Some(mut cursor_position_inside_content) = cursor_position_inside_content {
+                    // let old = cursor_position_inside_content;
+                    let mut new_cursor_position = None;
+
+                    if cursor_position_inside_content == 0 {
+                        if x > writable_width {
+                            new_cursor_position = Some((1, y + 1));
+                        } else {
+                            new_cursor_position = Some((x, y));
+                        }
+                    }
+
+                    for _ in content.chars() {
+                        if x > writable_width {
+                            x = 2;
+                            y += 1;
+                            cursor_position_inside_content =
+                                cursor_position_inside_content.saturating_sub(1);
+                            if cursor_position_inside_content == 0 && new_cursor_position.is_none()
+                            {
+                                new_cursor_position = Some((x, y));
+                            }
+                        } else {
+                            x += 1;
+                            cursor_position_inside_content =
+                                cursor_position_inside_content.saturating_sub(1);
+                            if cursor_position_inside_content == 0 && new_cursor_position.is_none()
+                            {
                                 if x > writable_width {
                                     new_cursor_position = Some((1, y + 1));
                                 } else {
                                     new_cursor_position = Some((x, y));
                                 }
                             }
-
-                            for _ in content.chars() {
-                                if x > writable_width {
-                                    x = 2;
-                                    y += 1;
-                                    cursor_position_inside_content =
-                                        cursor_position_inside_content.saturating_sub(1);
-                                    if cursor_position_inside_content == 0
-                                        && new_cursor_position.is_none()
-                                    {
-                                        new_cursor_position = Some((x, y));
-                                    }
-                                } else {
-                                    x += 1;
-                                    cursor_position_inside_content =
-                                        cursor_position_inside_content.saturating_sub(1);
-                                    if cursor_position_inside_content == 0
-                                        && new_cursor_position.is_none()
-                                    {
-                                        if x > writable_width {
-                                            new_cursor_position = Some((1, y + 1));
-                                        } else {
-                                            new_cursor_position = Some((x, y));
-                                        }
-                                    }
-                                }
-                            }
-
-                            let cursor_location = Rect {
-                                x: new_cursor_position.unwrap().0,
-                                y: new_cursor_position.unwrap().1,
-                                width: 1,
-                                height: 1,
-                            };
-
-                            frame.render_widget(Block::new().on_green(), cursor_location);
-                        } else {
-                            for _ in content.chars() {
-                                if x > writable_width {
-                                    x = 2;
-                                    y += 1;
-                                } else {
-                                    x += 1;
-                                }
-                            }
                         }
                     }
-                    StringType::Tab(_) => {
-                        let string_to_render = "|-->";
-                        let mut cursor_position_inside_content = None;
-                        if let Some(cursor_position) = model.current_command.cursor_position() {
-                            if cursor_position
-                                <= current_index_in_original_string + string_to_render.len() as u64
-                                && cursor_position > current_index_in_original_string
-                            {
-                                cursor_position_inside_content =
-                                    Some(cursor_position - current_index_in_original_string);
-                            }
-                        }
-                        current_index_in_original_string += string_to_render.len() as u64;
-                        if x + 1 + string_to_render.len() as u16 > layout.width {
-                            x = 1;
+
+                    let cursor_location = Rect {
+                        x: new_cursor_position.unwrap().0,
+                        y: new_cursor_position.unwrap().1,
+                        width: 1,
+                        height: 1,
+                    };
+
+                    frame.render_widget(Block::new().on_green(), cursor_location);
+                } else {
+                    for _ in content.chars() {
+                        if x > writable_width {
+                            x = 2;
                             y += 1;
-                        }
-                        let location = Rect {
-                            x,
-                            y,
-                            width: string_to_render.len() as u16,
-                            height: 1,
-                        };
-                        frame.render_widget(
-                            Paragraph::new(string_to_render)
-                                .block(Block::new().white().on_black())
-                                .wrap(Wrap { trim: false }),
-                            location,
-                        );
-                        if let Some(cursor_position_inside_content) = cursor_position_inside_content
-                        {
-                            let cursor_location = Rect {
-                                x: location.x + cursor_position_inside_content as u16,
-                                y: location.y,
-                                width: 1,
-                                height: 1,
-                            };
-
-                            frame.render_widget(Block::new().on_green(), cursor_location);
-                        }
-                        x += string_to_render.len() as u16;
-                    }
-                    StringType::Newline(content) => {
-                        let mut cursor_position_inside_content = None;
-                        if let Some(cursor_position) = model.current_command.cursor_position() {
-                            if cursor_position
-                                <= current_index_in_original_string + content.len() as u64
-                                && cursor_position > current_index_in_original_string
-                            {
-                                cursor_position_inside_content =
-                                    Some(cursor_position - current_index_in_original_string);
-                            }
-                        }
-                        current_index_in_original_string += content.len() as u64;
-                        y += 1;
-                        x = 1;
-                        if cursor_position_inside_content.is_some() {
-                            let cursor_location = Rect {
-                                x,
-                                y,
-                                width: 1,
-                                height: 1,
-                            };
-
-                            frame.render_widget(Block::new().on_green(), cursor_location);
+                        } else {
+                            x += 1;
                         }
                     }
                 }
             }
-        }
-        crate::HintState::HideHints => {
-            if let Some(input) = model.current_command.input_str() {
+            StringType::Tab(_) => {
+                let string_to_render = "|-->";
+                let mut cursor_position_inside_content = None;
+                if let Some(cursor_position) = model.current_command.cursor_position() {
+                    if cursor_position
+                        <= current_index_in_original_string + string_to_render.len() as u64
+                        && cursor_position > current_index_in_original_string
+                    {
+                        cursor_position_inside_content =
+                            Some(cursor_position - current_index_in_original_string);
+                    }
+                }
+                current_index_in_original_string += string_to_render.len() as u64;
+                if x + 1 + string_to_render.len() as u16 > layout.width {
+                    x = 1;
+                    y += 1;
+                }
+                let location = Rect {
+                    x,
+                    y,
+                    width: string_to_render.len() as u16,
+                    height: 1,
+                };
                 frame.render_widget(
-                    Paragraph::new(input)
-                        .block(Block::new().white().on_black().borders(Borders::ALL))
+                    Paragraph::new(string_to_render)
+                        .block(Block::new().white().on_black())
                         .wrap(Wrap { trim: false }),
-                    layout,
+                    location,
                 );
+                if let Some(cursor_position_inside_content) = cursor_position_inside_content {
+                    let cursor_location = Rect {
+                        x: location.x + cursor_position_inside_content as u16,
+                        y: location.y,
+                        width: 1,
+                        height: 1,
+                    };
+
+                    frame.render_widget(Block::new().on_green(), cursor_location);
+                }
+                x += string_to_render.len() as u16;
+            }
+            StringType::Newline(content) => {
+                let mut cursor_position_inside_content = None;
+                if let Some(cursor_position) = model.current_command.cursor_position() {
+                    if cursor_position <= current_index_in_original_string + content.len() as u64
+                        && cursor_position > current_index_in_original_string
+                    {
+                        cursor_position_inside_content =
+                            Some(cursor_position - current_index_in_original_string);
+                    }
+                }
+                current_index_in_original_string += content.len() as u64;
+                y += 1;
+                x = 1;
+                if cursor_position_inside_content.is_some() {
+                    let cursor_location = Rect {
+                        x,
+                        y,
+                        width: 1,
+                        height: 1,
+                    };
+
+                    frame.render_widget(Block::new().on_green(), cursor_location);
+                }
             }
         }
     }

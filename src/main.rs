@@ -293,8 +293,9 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                 }
             }
             event::Event::Down => {
-                if model.command_history.is_empty() {
-                } else if model.command_history_index < model.command_history.len() - 1 {
+                if !model.command_history.is_empty()
+                    && model.command_history_index < model.command_history.len() - 1
+                {
                     model.command_history_index += 1;
                     let completed_command = &model.command_history[model.command_history_index];
                     model.current_command =

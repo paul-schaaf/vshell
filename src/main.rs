@@ -8,6 +8,7 @@ pub enum StringType<'a> {
     Word(&'a str),
     Whitespace(&'a str),
     Tab,
+    // can be \n or \r\n or \r
     Newline(&'a str),
 }
 

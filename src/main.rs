@@ -7,7 +7,7 @@ mod view;
 pub enum StringType<'a> {
     Word(&'a str),
     Whitespace(&'a str),
-    Tab(&'a str),
+    Tab,
     Newline(&'a str),
 }
 
@@ -16,7 +16,7 @@ impl<'a> StringType<'a> {
         match self {
             StringType::Word(s) => s,
             StringType::Whitespace(s) => s,
-            StringType::Tab(s) => s,
+            StringType::Tab => "\t",
             StringType::Newline(s) => s,
         }
     }
@@ -46,7 +46,7 @@ fn split_string(input: &str) -> Vec<StringType> {
                     result.push(StringType::Whitespace(&input[whitespace_start..last_index]));
                 }
                 '\t' => {
-                    result.push(StringType::Tab(&input[index..index + 1]));
+                    result.push(StringType::Tab);
                     last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
                 }
                 '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
@@ -554,11 +554,14 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                         new_cursor_position += w.len() as u64;
                                     }
                                 }
-                                StringType::Newline(c)
-                                | StringType::Tab(c)
-                                | StringType::Whitespace(c) => {
+                                StringType::Newline(c) | StringType::Whitespace(c) => {
                                     if current <= beginning_index {
                                         new_cursor_position += c.len() as u64;
+                                    }
+                                }
+                                StringType::Tab => {
+                                    if current <= beginning_index {
+                                        new_cursor_position += 1;
                                     }
                                 }
                             }
@@ -602,10 +605,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                                     current += 1;
                                     new_cursor_position += w.len() as u64;
                                 }
-                                StringType::Newline(c)
-                                | StringType::Tab(c)
-                                | StringType::Whitespace(c) => {
+                                StringType::Newline(c) | StringType::Whitespace(c) => {
                                     new_cursor_position += c.len() as u64;
+                                }
+                                StringType::Tab => {
+                                    new_cursor_position += 1;
                                 }
                             }
                         }
@@ -720,8 +724,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             current += 1;
                             new_cursor_position += w.len() as u64;
                         }
-                        StringType::Newline(c) | StringType::Tab(c) | StringType::Whitespace(c) => {
+                        StringType::Newline(c) | StringType::Whitespace(c) => {
                             new_cursor_position += c.len() as u64;
+                        }
+                        StringType::Tab => {
+                            new_cursor_position += 1;
                         }
                     }
                 }
@@ -774,8 +781,11 @@ pub fn update(model: &mut Model, event: event::Event, clipboard: &mut Clipboard)
                             current += 1;
                             new_cursor_position += w.len() as u64;
                         }
-                        StringType::Newline(c) | StringType::Tab(c) | StringType::Whitespace(c) => {
+                        StringType::Newline(c) | StringType::Whitespace(c) => {
                             new_cursor_position += c.len() as u64;
+                        }
+                        StringType::Tab => {
+                            new_cursor_position += 1;
                         }
                     }
                 }

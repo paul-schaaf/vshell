@@ -268,6 +268,29 @@ pub fn update(
                                         "cd: incorrect number of arguments".to_string(),
                                     ),
                                 }
+                            } else if command_list[1].contains('~') {
+                                match dirs::home_dir() {
+                                    Some(home) => {
+                                        let new_path = command_list[1]
+                                            .replace('~', &home.to_string_lossy());
+                                        match std::env::set_current_dir(new_path) {
+                                            Ok(_) => CompletedCommand {
+                                                input: command.input.clone(),
+                                                output: Output::Success(String::new()),
+                                            },
+                                            Err(e) => CompletedCommand {
+                                                input: command.input.clone(),
+                                                output: Output::Error(format!("cd: {}", e)),
+                                            },
+                                        }
+                                    }
+                                    None => CompletedCommand {
+                                        input: command.input.clone(),
+                                        output: Output::Error(
+                                            "cd: could not find home directory".to_string(),
+                                        ),
+                                    },
+                                }
                             } else {
                                 match std::env::set_current_dir(&command_list[1]) {
                                     Ok(_) => CompletedCommand {

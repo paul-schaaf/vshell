@@ -6,6 +6,8 @@
   </p>
 </div>
 
+![example](example.png)
+
 # Compatibility
 -  [x] mac
 -  [?] linux 
@@ -15,9 +17,9 @@
 Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon commands that use the shell's features.
 
 - [x] basic shell functionality
-- [x] pinned commands
-- [x] command history
-- [x] hints to edit and jump around
+- [x] pinned commands (press `ctrl-p` to pin/unpin the currently selected command. pinned commands stay at the top of the history (see screenshot))
+- [x] command history (use and up down arrows or `ctrl-s` + `number` to select command from the history)
+- [x] hints to edit and jump around (use `ctrl-b` and `ctrl-a` to jump before and after hints respectively. use `ctrl-e` to edit a hint. use `ctrl-h` to toggle hints.)
 - [ ] expanding globs(*)
 - [ ] unicode support
 - [ ] piping commands
@@ -27,6 +29,7 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [ ] pagination
 - [ ] search and replace
 - [ ] variable expansion
+- [ ] ssh
 
 # Known Bugs
   - if your input is larger than the window for it, the program will crash

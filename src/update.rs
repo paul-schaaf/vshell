@@ -17,7 +17,7 @@ fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
     Ok(result)
 }
 
-pub fn update(
+pub(crate) fn update(
     model: &mut Model,
     event: event::Event,
     clipboard: &mut Clipboard,

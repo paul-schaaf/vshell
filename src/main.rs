@@ -119,20 +119,28 @@ pub fn update(
     fn has_open_quote(s: &str) -> Option<char> {
         let mut single_quote_open = false;
         let mut double_quote_open = false;
+        let mut escape = false;
 
         for c in s.chars() {
             match c {
                 '\'' => {
-                    if !double_quote_open {
-                        single_quote_open = !single_quote_open
+                    if !double_quote_open && !escape {
+                        single_quote_open = !single_quote_open;
                     }
+                    escape = false; // Reset escape flag
                 }
                 '\"' => {
-                    if !single_quote_open {
-                        double_quote_open = !double_quote_open
+                    if !single_quote_open && !escape {
+                        double_quote_open = !double_quote_open;
                     }
+                    escape = false; // Reset escape flag
                 }
-                _ => {}
+                '\\' => {
+                    escape = !escape; // Toggle escape flag
+                }
+                _ => {
+                    escape = false; // Reset escape flag for other characters
+                }
             }
         }
 
@@ -191,24 +199,13 @@ pub fn update(
                         if command.cursor_position > 0 {
                             command.input.remove(command.cursor_position as usize - 1);
                             command.cursor_position -= 1;
-                            command.inside_quote = has_open_quote(&command.input);
                         }
                     }
                     CurrentView::CommandWithOutput(command) => {
                         let mut command = command.input.clone();
                         command.pop();
-                        let inside_quote = has_open_quote(&command);
-                        if let Some(inside_quote) = inside_quote {
-                            model.current_command =
-                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                    inside_quote: Some(inside_quote),
-                                    cursor_position: command.len() as u64,
-                                    input: command,
-                                });
-                            model.command_history_index = model.command_history.len();
-                        } else {
-                            model.set_current_view_from_command(command.len() as u64, command);
-                        }
+
+                        model.set_current_view_from_command(command.len() as u64, command);
                     }
                     CurrentView::Output(_) => {
                         // do nothing
@@ -226,15 +223,15 @@ pub fn update(
                         if command.input.is_empty() {
                             return Ok(());
                         }
-                        if command.inside_quote.is_some() {
+                        if has_open_quote(&command.input).is_some() {
                             command.input.push('\n');
-                            command.cursor_position += 1;
+                            command.cursor_position = command.input.len() as u64;
                             return Ok(());
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
                         if command.input.ends_with('\\') {
                             command.input.push('\n');
-                            command.cursor_position += 1;
+                            command.cursor_position = command.input.len() as u64;
                             return Ok(());
                         }
 
@@ -408,35 +405,26 @@ pub fn update(
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
                         command.input.insert(command.cursor_position as usize, c);
+
                         command.cursor_position += 1;
-                        if command.inside_quote.is_none() && (c == '\'' || c == '"') {
-                            command.inside_quote = Some(c);
-                        } else if command.inside_quote == Some(c) {
-                            command.inside_quote = None;
-                        }
                     }
                     CurrentView::CommandWithOutput(command) => {
                         let mut command = command.input.clone();
                         command.push(c);
-                        if c == '\'' || c == '"' {
-                            model.current_command =
-                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                    inside_quote: Some(c),
-                                    cursor_position: command.len() as u64,
-                                    input: command,
-                                });
-                        } else {
-                            model.current_command =
-                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                    inside_quote: None,
-                                    cursor_position: command.len() as u64,
-                                    input: command,
-                                });
-                        }
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                cursor_position: command.len() as u64,
+                                input: command,
+                            });
                         model.command_history_index = model.command_history.len();
                     }
                     CurrentView::Output(_) => {
-                        model.set_current_view_from_command(1, String::from(c));
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                cursor_position: 1,
+                                input: String::from(c),
+                            });
+                        model.command_history_index = model.command_history.len();
                     }
                 };
                 Ok(())
@@ -447,7 +435,6 @@ pub fn update(
                     let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            inside_quote: has_open_quote(new_command.as_str()),
                             input: new_command,
                             cursor_position: command.cursor_position + text_to_insert.len() as u64,
                         });
@@ -458,7 +445,6 @@ pub fn update(
                     let new_command = format!("{}{}", command.input, text_to_insert);
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            inside_quote: has_open_quote(new_command.as_str()),
                             input: new_command,
                             cursor_position: command.input.len() as u64
                                 + text_to_insert.len() as u64,
@@ -469,7 +455,6 @@ pub fn update(
                     let new_command = clipboard.get_text()?;
                     model.current_command =
                         CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            inside_quote: has_open_quote(new_command.as_str()),
                             cursor_position: new_command.len() as u64,
                             input: new_command,
                         });
@@ -492,7 +477,6 @@ pub fn update(
                         Ok(())
                     } else {
                         model.pinned_commands.push(CommandWithoutOutput {
-                            inside_quote: c.inside_quote,
                             input: c.input.clone(),
                             cursor_position: c.cursor_position,
                         });
@@ -517,7 +501,6 @@ pub fn update(
                         Ok(())
                     } else {
                         model.pinned_commands.push(CommandWithoutOutput {
-                            inside_quote: None,
                             input: c.input.clone(),
                             cursor_position: c.input.len() as u64,
                         });
@@ -556,7 +539,6 @@ pub fn update(
                     CurrentView::CommandWithOutput(command) => {
                         model.current_command =
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                inside_quote: None,
                                 // SAFETY: this is a command with output so it has completed
                                 // which means its input must have had at least length one
                                 cursor_position: command.input.len() as u64 - 1,
@@ -582,7 +564,6 @@ pub fn update(
                     CurrentView::CommandWithOutput(command) => {
                         model.current_command =
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                inside_quote: None,
                                 cursor_position: command.input.len() as u64,
                                 input: command.input.clone(),
                             });
@@ -706,7 +687,6 @@ pub fn update(
                             .join("");
                         model.current_command =
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                inside_quote: has_open_quote(&new_command),
                                 cursor_position: new_cursor_position,
                                 input: new_command,
                             });
@@ -755,7 +735,6 @@ pub fn update(
 
                             model.current_command =
                                 CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                    inside_quote: has_open_quote(&new_command),
                                     cursor_position: new_cursor_position,
                                     input: new_command,
                                 });
@@ -797,7 +776,6 @@ pub fn update(
                         let completed_command = &model.pinned_commands[number];
                         model.current_command =
                             CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                inside_quote: completed_command.inside_quote,
                                 input: completed_command.input.clone(),
                                 cursor_position: completed_command.cursor_position,
                             });
@@ -1000,7 +978,6 @@ impl Output {
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct CommandWithoutOutput {
-    inside_quote: Option<char>,
     cursor_position: u64,
     input: String,
 }
@@ -1059,7 +1036,6 @@ impl Model {
 
     fn set_current_view_from_command(&mut self, cursor_position: u64, command: String) {
         self.current_command = CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-            inside_quote: None,
             cursor_position,
             input: command,
         });

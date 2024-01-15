@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq)]
-pub enum Event {
+pub(crate) enum Event {
     CtrlC,
     CtrlE,
     CtrlH,
@@ -19,7 +19,7 @@ pub enum Event {
     Character(char),
 }
 
-pub fn wait_for_event() -> Event {
+pub(crate) fn wait_for_event() -> Event {
     loop {
         if let Ok(crossterm_event) = crossterm::event::read() {
             if let Some(event) = create_event(crossterm_event) {
@@ -29,7 +29,7 @@ pub fn wait_for_event() -> Event {
     }
 }
 
-pub fn get_event() -> Result<Option<Event>, Box<dyn std::error::Error>> {
+pub(crate) fn get_event() -> Result<Option<Event>, Box<dyn std::error::Error>> {
     // TODO: remove unwrap
     if crossterm::event::poll(std::time::Duration::from_secs(0))? {
         // TODO: remove unwrap
@@ -39,7 +39,7 @@ pub fn get_event() -> Result<Option<Event>, Box<dyn std::error::Error>> {
     }
 }
 
-pub fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
+fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
     match crossterm_event {
         crossterm::event::Event::Key(key) => {
             if key.kind == crossterm::event::KeyEventKind::Press {

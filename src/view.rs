@@ -6,7 +6,7 @@ use ratatui::{
 
 use crate::{split_string, CurrentView, Mode, Model, Output, StringType};
 
-pub fn view(model: &Model, frame: &mut ratatui::Frame) {
+pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
     let outer_layout = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints(vec![

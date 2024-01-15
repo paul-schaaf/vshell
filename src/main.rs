@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum StringType<'a> {
+enum StringType<'a> {
     Word(&'a str),
     Whitespace(&'a str),
     Tab,
@@ -39,7 +39,7 @@ pub enum StringType<'a> {
 }
 
 impl<'a> StringType<'a> {
-    pub fn as_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         match self {
             StringType::Word(s) => s,
             StringType::Whitespace(s) => s,
@@ -102,7 +102,7 @@ fn split_string(input: &str) -> Vec<StringType> {
 }
 
 #[derive(Debug, PartialEq, Default)]
-pub enum Mode {
+enum Mode {
     #[default]
     Idle,
     Editing(String),
@@ -113,19 +113,19 @@ pub enum Mode {
 }
 
 #[derive(Debug, PartialEq, Default)]
-pub enum HintState {
+enum HintState {
     #[default]
     ShowHints,
     HideHints,
 }
 
 #[derive(Debug, PartialEq, Default)]
-pub struct Config {
+struct Config {
     hint_state: HintState,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub enum Output {
+enum Output {
     Success(String),
     Error(String),
     #[default]
@@ -133,7 +133,7 @@ pub enum Output {
 }
 
 impl Output {
-    pub fn as_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         match self {
             Output::Success(output) => output.as_str(),
             Output::Error(output) => output.as_str(),
@@ -143,26 +143,26 @@ impl Output {
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
-pub struct CommandWithoutOutput {
+struct CommandWithoutOutput {
     cursor_position: u64,
     input: String,
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]
-pub struct CompletedCommand {
+struct CompletedCommand {
     input: String,
     output: Output,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum CurrentView {
+enum CurrentView {
     CommandWithoutOutput(CommandWithoutOutput),
     Output(Output),
     CommandWithOutput(CompletedCommand),
 }
 
 impl CurrentView {
-    pub fn input_str(&self) -> Option<&str> {
+    fn input_str(&self) -> Option<&str> {
         match self {
             CurrentView::CommandWithoutOutput(command) => Some(command.input.as_str()),
             CurrentView::Output(_) => None,
@@ -170,7 +170,7 @@ impl CurrentView {
         }
     }
 
-    pub fn cursor_position(&self) -> Option<u64> {
+    fn cursor_position(&self) -> Option<u64> {
         match self {
             CurrentView::CommandWithoutOutput(command) => Some(command.cursor_position),
             CurrentView::Output(_) => None,
@@ -186,7 +186,7 @@ impl Default for CurrentView {
 }
 
 #[derive(Debug, PartialEq, Default)]
-pub struct Model {
+struct Model {
     mode: Mode,
     config: Config,
     command_history: Vec<CompletedCommand>,
@@ -196,7 +196,7 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn should_quit(&self) -> bool {
+    fn should_quit(&self) -> bool {
         self.mode == Mode::Quit
     }
 

@@ -338,13 +338,27 @@ pub fn update(
             event::Event::CtrlV => match &model.current_command {
                 CurrentView::CommandWithoutOutput(command) => {
                     let text_to_insert = clipboard.get_text()?;
-                    let new_command = format!("{}{}", command.input, text_to_insert);
-                    model.current_command =
-                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            input: new_command,
-                            cursor_position: command.cursor_position + text_to_insert.len() as u64,
-                        });
-                    Ok(())
+                    if command.cursor_position == command.input.len() as u64 {
+                        let new_command = format!("{}{}", command.input, text_to_insert);
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                input: new_command,
+                                cursor_position: command.cursor_position
+                                    + text_to_insert.len() as u64,
+                            });
+                        Ok(())
+                    } else {
+                        let (first, second) =
+                            command.input.split_at(command.cursor_position as usize);
+                        let new_command = format!("{}{}{}", first, text_to_insert, second);
+                        model.current_command =
+                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                input: new_command,
+                                cursor_position: command.cursor_position
+                                    + text_to_insert.len() as u64,
+                            });
+                        Ok(())
+                    }
                 }
                 CurrentView::CommandWithOutput(command) => {
                     let text_to_insert = clipboard.get_text()?;

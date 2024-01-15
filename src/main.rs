@@ -241,39 +241,86 @@ pub fn update(
                         // SAFETY: our shell handles input validation so this will not fail
                         let command_list = shlex::split(&command.input).unwrap();
 
-                        let executed_command = std::process::Command::new(&command_list[0])
-                            .args(&command_list[1..])
-                            .output();
-
-                        let completed_command = CompletedCommand {
-                            input: command.input.clone(),
-                            output: {
-                                match executed_command {
-                                    Ok(executed_command) => {
-                                        if executed_command.status.success() {
-                                            Output::Success(
-                                                String::from_utf8_lossy(&executed_command.stdout)
-                                                    .to_string(),
-                                            )
-                                        } else {
-                                            Output::Error(
-                                                String::from_utf8_lossy(&executed_command.stderr)
-                                                    .to_string(),
-                                            )
-                                        }
-                                    }
-                                    Err(executed_command) => {
-                                        if executed_command.kind() == std::io::ErrorKind::NotFound {
-                                            Output::Error(format!(
-                                                "Command not found: {}",
-                                                command_list[0]
-                                            ))
-                                        } else {
-                                            Output::Error(executed_command.to_string())
-                                        }
-                                    }
+                        let completed_command = if command_list[0] == "cd" {
+                            if command_list.len() == 1 {
+                                match dirs::home_dir() {
+                                    Some(home) => match std::env::set_current_dir(home) {
+                                        Ok(_) => CompletedCommand {
+                                            input: command.input.clone(),
+                                            output: Output::Success(String::new()),
+                                        },
+                                        Err(e) => CompletedCommand {
+                                            input: command.input.clone(),
+                                            output: Output::Error(format!("cd: {}", e)),
+                                        },
+                                    },
+                                    None => CompletedCommand {
+                                        input: command.input.clone(),
+                                        output: Output::Error(
+                                            "cd: could not find home directory".to_string(),
+                                        ),
+                                    },
                                 }
-                            },
+                            } else if command_list.len() != 2 {
+                                CompletedCommand {
+                                    input: command.input.clone(),
+                                    output: Output::Error(
+                                        "cd: incorrect number of arguments".to_string(),
+                                    ),
+                                }
+                            } else {
+                                match std::env::set_current_dir(&command_list[1]) {
+                                    Ok(_) => CompletedCommand {
+                                        input: command.input.clone(),
+                                        output: Output::Success(String::new()),
+                                    },
+                                    Err(e) => CompletedCommand {
+                                        input: command.input.clone(),
+                                        output: Output::Error(format!("cd: {}", e)),
+                                    },
+                                }
+                            }
+                        } else {
+                            let executed_command = std::process::Command::new(&command_list[0])
+                                .args(&command_list[1..])
+                                .output();
+
+                            CompletedCommand {
+                                input: command.input.clone(),
+                                output: {
+                                    match executed_command {
+                                        Ok(executed_command) => {
+                                            if executed_command.status.success() {
+                                                Output::Success(
+                                                    String::from_utf8_lossy(
+                                                        &executed_command.stdout,
+                                                    )
+                                                    .to_string(),
+                                                )
+                                            } else {
+                                                Output::Error(
+                                                    String::from_utf8_lossy(
+                                                        &executed_command.stderr,
+                                                    )
+                                                    .to_string(),
+                                                )
+                                            }
+                                        }
+                                        Err(executed_command) => {
+                                            if executed_command.kind()
+                                                == std::io::ErrorKind::NotFound
+                                            {
+                                                Output::Error(format!(
+                                                    "Command not found: {}",
+                                                    command_list[0]
+                                                ))
+                                            } else {
+                                                Output::Error(executed_command.to_string())
+                                            }
+                                        }
+                                    }
+                                },
+                            }
                         };
                         model.command_history.push(completed_command.clone());
                         model.current_command =

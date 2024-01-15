@@ -50,7 +50,7 @@ fn split_string(input: &str) -> Vec<StringType> {
                     result.push(StringType::Tab);
                     last_index = index + 1; // update last_index to current index + 1 because we're out of the matched range
                 }
-                '\n' | '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
+                '\r' if matches!(chars.peek(), Some((_, '\n'))) => {
                     // for "\r\n", take both characters together as newline
                     result.push(StringType::Newline(&input[index..index + 2]));
                     chars.next();
@@ -271,8 +271,8 @@ pub fn update(
                             } else if command_list[1].contains('~') {
                                 match dirs::home_dir() {
                                     Some(home) => {
-                                        let new_path = command_list[1]
-                                            .replace('~', &home.to_string_lossy());
+                                        let new_path =
+                                            command_list[1].replace('~', &home.to_string_lossy());
                                         match std::env::set_current_dir(new_path) {
                                             Ok(_) => CompletedCommand {
                                                 input: command.input.clone(),

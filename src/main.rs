@@ -238,25 +238,40 @@ pub fn update(
                             return Ok(());
                         }
 
-                        let executed_command = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&command.input)
-                            .output()
-                            .expect("failed to execute process");
+                        // SAFETY: our shell handles input validation so this will not fail
+                        let command_list = shlex::split(&command.input).unwrap();
+
+                        let executed_command = std::process::Command::new(&command_list[0])
+                            .args(&command_list[1..])
+                            .output();
 
                         let completed_command = CompletedCommand {
                             input: command.input.clone(),
                             output: {
-                                if executed_command.status.success() {
-                                    Output::Success(
-                                        String::from_utf8_lossy(&executed_command.stdout)
-                                            .to_string(),
-                                    )
-                                } else {
-                                    Output::Error(
-                                        String::from_utf8_lossy(&executed_command.stderr)
-                                            .to_string(),
-                                    )
+                                match executed_command {
+                                    Ok(executed_command) => {
+                                        if executed_command.status.success() {
+                                            Output::Success(
+                                                String::from_utf8_lossy(&executed_command.stdout)
+                                                    .to_string(),
+                                            )
+                                        } else {
+                                            Output::Error(
+                                                String::from_utf8_lossy(&executed_command.stderr)
+                                                    .to_string(),
+                                            )
+                                        }
+                                    }
+                                    Err(executed_command) => {
+                                        if executed_command.kind() == std::io::ErrorKind::NotFound {
+                                            Output::Error(format!(
+                                                "Command not found: {}",
+                                                command_list[0]
+                                            ))
+                                        } else {
+                                            Output::Error(executed_command.to_string())
+                                        }
+                                    }
                                 }
                             },
                         };

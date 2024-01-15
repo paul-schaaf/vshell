@@ -415,6 +415,9 @@ pub fn update(
                 }
             },
             event::Event::CtrlS => {
+                if model.command_history.is_empty() {
+                    return Ok(());
+                }
                 model.mode = Mode::Selecting(String::new());
                 Ok(())
             }
@@ -675,6 +678,12 @@ pub fn update(
                 Ok(())
             }
             event::Event::Enter => {
+                if number.is_empty() {
+                    model.set_current_view_from_command(0, String::new());
+                    model.mode = Mode::Idle;
+                    return Ok(());
+                }
+
                 // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
                 let number = number.parse::<usize>()?;
                 if number < model.command_history.len() + model.pinned_commands.len() {

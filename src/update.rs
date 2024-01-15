@@ -208,7 +208,12 @@ pub fn update(
                             }
                         } else {
                             let executed_command = std::process::Command::new(&command_list[0])
-                                .args(&command_list[1..])
+                                .args(
+                                    &command_list[1..]
+                                        .iter()
+                                        .filter(|s| !s.is_empty())
+                                        .collect::<Vec<&String>>(),
+                                )
                                 .output();
 
                             CompletedCommand {

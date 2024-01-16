@@ -1,7 +1,7 @@
 use ratatui::{
     layout::Rect,
     style::Stylize,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::{split_string, CurrentView, Mode, Model, Output, StringType};
@@ -112,6 +112,30 @@ pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
             .wrap(Wrap { trim: false }),
         left_layout[1],
     );
+
+    if let Mode::Command(command) = &model.mode {
+        frame.render_widget(
+            Clear,
+            Rect {
+                x: outer_layout[0].x,
+                y: outer_layout[0].height - 3,
+                width: outer_layout[0].width + outer_layout[1].width,
+                height: 3,
+            },
+        );
+
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(command.as_str())
+                .block(Block::new().white().on_black().bold().borders(Borders::ALL))
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: outer_layout[0].x,
+                y: outer_layout[0].height - 3,
+                width: outer_layout[0].width + outer_layout[1].width,
+                height: 3,
+            },
+        );
+    }
 }
 
 fn base10_to_base26(mut num: u32) -> String {
@@ -452,25 +476,14 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
         }
     }
 
-    let heading = match &model.mode {
-        Mode::Idle | Mode::Quit => String::from("Input"),
-        // Mode::Idle | Mode::Quit => format!(
-        //     "Input - Cursor({})",
-        //     model.current_command.cursor_position().unwrap_or_default()
-        // ),
-        Mode::Editing(hint) => format!("Input - Editing({})", hint),
-        Mode::Selecting(number) => format!("Input - Selecting({})", number),
-        Mode::JumpingBefore(hint) => format!("Input - JumpingBefore({})", hint),
-        Mode::JumpingAfter(hint) => format!("Input - JumpingAfter({})", hint),
-    };
     frame.render_widget(
-        ratatui::widgets::Paragraph::new(heading.as_str())
+        ratatui::widgets::Paragraph::new("Input")
             .block(Block::new().white().on_black().bold())
             .wrap(Wrap { trim: false }),
         Rect {
             x: 0,
             y: 0,
-            width: heading.len() as u16,
+            width: "Input".len() as u16,
             height: 1,
         },
     );

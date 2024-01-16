@@ -17,6 +17,141 @@ fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
     Ok(result)
 }
 
+enum Command {
+    Quit,
+    Edit(Edit),
+    Select(Option<usize>),
+    JumpBefore(String),
+    JumpAfter(String),
+    Pin,
+    CopyOutput,
+    Paste,
+    ToggleHints,
+}
+
+pub enum Edit {
+    Single(String),
+    Range(String, String),
+}
+
+impl TryFrom<&str> for Command {
+    type Error = &'static str;
+
+    fn try_from(input: &str) -> Result<Self, Self::Error> {
+        if input.is_empty() {
+            return Err("Empty Command");
+        }
+        let split_input = input.split(':').collect::<Vec<&str>>();
+        if split_input.len() > 2 {
+            return Err("Invalid Command");
+        }
+        match split_input[0] {
+            "q" | "quit" => Ok(Command::Quit),
+            "c" | "change" => {
+                if split_input.len() != 2 {
+                    return Err("Invalid Command");
+                }
+                match split_input[1].contains(',') {
+                    true => {
+                        let mut hints = split_input[1].split(',');
+                        let beginning_hint = hints.next().unwrap();
+                        let end_hint = hints.next().unwrap();
+                        if hints.next().is_some() {
+                            return Err("Invalid Command");
+                        }
+                        let mut beginning = String::new();
+                        for c in beginning_hint.chars() {
+                            if c.is_alphabetic() {
+                                beginning.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if beginning.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        let mut end = String::new();
+                        for c in end_hint.chars() {
+                            if c.is_alphabetic() {
+                                end.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if end.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        Ok(Command::Edit(Edit::Range(beginning, end)))
+                    }
+                    false => {
+                        let mut hint = String::new();
+                        for c in split_input[1].chars() {
+                            if c.is_alphabetic() {
+                                hint.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if hint.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        Ok(Command::Edit(Edit::Single(hint)))
+                    }
+                }
+            }
+            "s" | "select" => {
+                if split_input.len() != 2 {
+                    return Ok(Command::Select(None));
+                }
+                let mut target = String::new();
+                for c in split_input[1].chars() {
+                    if c.is_ascii_digit() {
+                        target.push(c);
+                    } else {
+                        return Err("Invalid Character");
+                    }
+                }
+                Ok(Command::Select(Some(
+                    target.parse::<usize>().map_err(|_| "Invalid Number")?,
+                )))
+            }
+            "jb" | "jumpbefore" => {
+                if split_input.len() != 2 {
+                    return Ok(Command::JumpBefore(String::new()));
+                }
+                let mut hint = String::new();
+                for c in split_input[1].chars() {
+                    if c.is_alphabetic() {
+                        hint.push(c);
+                    } else {
+                        return Err("Invalid Character");
+                    }
+                }
+                Ok(Command::JumpBefore(hint))
+            }
+            "ja" | "jumpafter" => {
+                if split_input.len() != 2 {
+                    return Ok(Command::JumpAfter(String::new()));
+                }
+                let mut hint = String::new();
+                for c in split_input[1].chars() {
+                    if c.is_alphabetic() {
+                        hint.push(c);
+                    } else {
+                        return Err("Invalid Character");
+                    }
+                }
+                Ok(Command::JumpAfter(hint))
+            }
+            "pin" => Ok(Command::Pin),
+            "p" | "paste" => Ok(Command::Paste),
+            "copyoutput" => Ok(Command::CopyOutput),
+            "togglehints" => Ok(Command::ToggleHints),
+            _ => Err("Invalid Command"),
+        }
+    }
+}
+
 pub(crate) fn update(
     model: &mut Model,
     event: event::Event,
@@ -167,35 +302,6 @@ pub(crate) fn update(
                 model.mode = Mode::Quit;
                 Ok(())
             }
-            event::Event::CtrlE => {
-                match &model.current_command {
-                    CurrentView::CommandWithoutOutput(command) => {
-                        if !command.input.is_empty() {
-                            model.mode = Mode::Editing(String::new());
-                        }
-                        Ok(())
-                    }
-                    CurrentView::CommandWithOutput(command) => {
-                        model.mode = Mode::Editing(String::new());
-                        model.set_current_view_from_command(
-                            command.input.len() as u64,
-                            command.input.clone(),
-                        );
-                        Ok(())
-                    }
-                    CurrentView::Output(_) => {
-                        // do nothing
-                        Ok(())
-                    }
-                }
-            }
-            event::Event::CtrlH => {
-                model.config.hint_state = match model.config.hint_state {
-                    HintState::ShowHints => HintState::HideHints,
-                    HintState::HideHints => HintState::ShowHints,
-                };
-                Ok(())
-            }
             event::Event::Backspace => {
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
@@ -217,7 +323,7 @@ pub(crate) fn update(
                 Ok(())
             }
             event::Event::Esc => {
-                // do nothing
+                model.mode = Mode::Command(String::new());
                 Ok(())
             }
             event::Event::Enter => {
@@ -306,122 +412,7 @@ pub(crate) fn update(
                 };
                 Ok(())
             }
-            event::Event::CtrlV => match &model.current_command {
-                CurrentView::CommandWithoutOutput(command) => {
-                    let text_to_insert = clipboard.get_text()?;
-                    if command.cursor_position == command.input.len() as u64 {
-                        let new_command = format!("{}{}", command.input, text_to_insert);
-                        model.current_command =
-                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                input: new_command,
-                                cursor_position: command.cursor_position
-                                    + text_to_insert.len() as u64,
-                            });
-                        Ok(())
-                    } else {
-                        let (first, second) =
-                            command.input.split_at(command.cursor_position as usize);
-                        let new_command = format!("{}{}{}", first, text_to_insert, second);
-                        model.current_command =
-                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                input: new_command,
-                                cursor_position: command.cursor_position
-                                    + text_to_insert.len() as u64,
-                            });
-                        Ok(())
-                    }
-                }
-                CurrentView::CommandWithOutput(command) => {
-                    let text_to_insert = clipboard.get_text()?;
-                    let new_command = format!("{}{}", command.input, text_to_insert);
-                    model.current_command =
-                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            input: new_command,
-                            cursor_position: command.input.len() as u64
-                                + text_to_insert.len() as u64,
-                        });
-                    Ok(())
-                }
-                CurrentView::Output(_) => {
-                    let new_command = clipboard.get_text()?;
-                    model.current_command =
-                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                            cursor_position: new_command.len() as u64,
-                            input: new_command,
-                        });
-                    model.command_history_index = model.command_history.len();
-                    Ok(())
-                }
-            },
-            event::Event::CtrlP => match &model.current_command {
-                CurrentView::CommandWithoutOutput(c) => {
-                    if c.input.is_empty() {
-                        return Ok(());
-                    }
-                    let position = model
-                        .pinned_commands
-                        .iter()
-                        .map(|pinned_command| pinned_command.input.clone())
-                        .position(|past_command| past_command == c.input);
-                    if let Some(position) = position {
-                        model.pinned_commands.remove(position);
-                        Ok(())
-                    } else {
-                        model.pinned_commands.push(CommandWithoutOutput {
-                            input: c.input.clone(),
-                            cursor_position: c.cursor_position,
-                        });
-                        Ok(())
-                    }
-                }
-                CurrentView::Output(_) => {
-                    // do nothing
-                    Ok(())
-                }
-                CurrentView::CommandWithOutput(c) => {
-                    if c.input.is_empty() {
-                        return Ok(());
-                    }
-                    let position = model
-                        .pinned_commands
-                        .iter()
-                        .map(|pinned_command| pinned_command.input.clone())
-                        .position(|past_command| past_command == c.input);
-                    if let Some(position) = position {
-                        model.pinned_commands.remove(position);
-                        Ok(())
-                    } else {
-                        model.pinned_commands.push(CommandWithoutOutput {
-                            input: c.input.clone(),
-                            cursor_position: c.input.len() as u64,
-                        });
-                        Ok(())
-                    }
-                }
-            },
-            event::Event::CtrlS => {
-                if model.command_history.is_empty() {
-                    return Ok(());
-                }
-                model.mode = Mode::Selecting(String::new());
-                Ok(())
-            }
-            event::Event::CtrlO => {
-                match model.current_command {
-                    CurrentView::CommandWithoutOutput(_) => {
-                        // do nothing
-                        Ok(())
-                    }
-                    CurrentView::CommandWithOutput(ref command) => {
-                        clipboard.set_text(command.output.as_str())?;
-                        Ok(())
-                    }
-                    CurrentView::Output(ref command) => {
-                        clipboard.set_text(command.as_str())?;
-                        Ok(())
-                    }
-                }
-            }
+
             event::Event::Left => {
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
@@ -470,141 +461,256 @@ pub(crate) fn update(
                     }
                 }
             }
-            event::Event::CtrlB => {
-                match &model.current_command {
-                    CurrentView::CommandWithoutOutput(c) => {
-                        if !c.input.is_empty() {
-                            model.mode = Mode::JumpingBefore(String::new());
-                        }
-                        Ok(())
-                    }
-                    CurrentView::Output(_) => {
-                        // do nothing
-                        Ok(())
-                    }
-                    CurrentView::CommandWithOutput(c) => {
-                        if !c.input.is_empty() {
-                            model.mode = Mode::JumpingBefore(String::new());
-                        }
-                        model.set_current_view_from_command(c.input.len() as u64, c.input.clone());
-                        Ok(())
-                    }
-                }
-            }
-            event::Event::CtrlA => {
-                match &model.current_command {
-                    CurrentView::CommandWithoutOutput(c) => {
-                        if !c.input.is_empty() {
-                            model.mode = Mode::JumpingAfter(String::new());
-                        }
-                        Ok(())
-                    }
-                    CurrentView::Output(_) => {
-                        // do nothing
-                        Ok(())
-                    }
-                    CurrentView::CommandWithOutput(c) => {
-                        if !c.input.is_empty() {
-                            model.mode = Mode::JumpingAfter(String::new());
-                        }
-                        Ok(())
-                    }
-                }
-            }
         },
-        Mode::Editing(hint) => match event {
-            event::Event::Esc | event::Event::CtrlE => {
+
+        // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
+        Mode::Quit => unreachable!(),
+        Mode::Command(command) => match event {
+            event::Event::CtrlC => {
+                model.mode = Mode::Quit;
+                Ok(())
+            }
+            event::Event::Esc => {
                 model.mode = Mode::Idle;
                 Ok(())
             }
-            event::Event::Enter => match &model.current_command {
-                CurrentView::CommandWithoutOutput(command) => {
-                    if hint.contains(',') {
-                        let indices = hint.split(',').collect::<Vec<&str>>();
-                        if indices.len() != 2 {
-                            return Ok(());
+            event::Event::Character(c) => {
+                command.push(c);
+                Ok(())
+            }
+            event::Event::Backspace => {
+                command.pop();
+                Ok(())
+            }
+            event::Event::Enter => {
+                let command = Command::try_from(command.as_str());
+                if command.is_err() {
+                    return Ok(());
+                }
+                let command = command.unwrap();
+                match command {
+                    Command::Quit => {
+                        model.mode = Mode::Quit;
+                        Ok(())
+                    }
+                    Command::Edit(edit) => {
+                        match &model.current_command {
+                            CurrentView::CommandWithOutput(command) => {
+                                model.set_current_view_from_command(
+                                    command.input.len() as u64,
+                                    command.input.clone(),
+                                );
+                            }
+                            CurrentView::Output(_) => {
+                                // do nothing
+                                return Ok(());
+                            }
+                            _ => {}
                         }
-                        let beginning_index = base26_to_base10(indices[0]);
-                        if beginning_index.is_err() {
-                            return Ok(());
-                        }
-                        let end_index = base26_to_base10(indices[1]);
-                        if end_index.is_err() {
-                            return Ok(());
-                        }
-                        model.mode = Mode::Idle;
-                        // SAFETY: just checked for none
-                        let beginning_index = beginning_index.unwrap();
-                        // SAFETY: just checked for none
-                        let end_index = end_index.unwrap();
-                        if end_index < beginning_index {
-                            return Ok(());
-                        }
-                        let mut split_command = split_string(&command.input);
-                        let mut current = 0;
-                        let mut new_cursor_position = 0;
-                        let mut indices_to_delete = Vec::new();
-                        for (real_index, element) in split_command.iter().enumerate() {
-                            match element {
-                                StringType::Word(w) => {
-                                    if current == beginning_index || current == end_index {
-                                        indices_to_delete.push(real_index);
+
+                        match &model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                match edit {
+                                    Edit::Single(hint) => {
+                                        let index = base26_to_base10(&hint);
+                                        if index.is_err() {
+                                            return Ok(());
+                                        }
+                                        // SAFETY: just checked for err
+                                        let index = index.unwrap();
+                                        model.mode = Mode::Idle;
+                                        let mut split_command = split_string(&command.input);
+                                        let mut current = 0;
+                                        let mut new_cursor_position = 0;
+                                        let mut index_to_delete = None;
+                                        for (real_index, element) in
+                                            split_command.iter().enumerate()
+                                        {
+                                            match element {
+                                                StringType::Word(w) => {
+                                                    if current == index {
+                                                        index_to_delete = Some(real_index);
+                                                        break;
+                                                    }
+                                                    current += 1;
+                                                    new_cursor_position += w.len() as u64;
+                                                }
+                                                StringType::Newline(c)
+                                                | StringType::Whitespace(c) => {
+                                                    new_cursor_position += c.len() as u64;
+                                                }
+                                                StringType::Tab => {
+                                                    new_cursor_position += 1;
+                                                }
+                                            }
+                                        }
+                                        if let Some(index_to_delete) = index_to_delete {
+                                            split_command.remove(index_to_delete);
+
+                                            let new_command = split_command
+                                                .iter()
+                                                .map(|s| s.as_str())
+                                                .collect::<Vec<&str>>()
+                                                .join("");
+
+                                            model.current_command =
+                                                CurrentView::CommandWithoutOutput(
+                                                    CommandWithoutOutput {
+                                                        cursor_position: new_cursor_position,
+                                                        input: new_command,
+                                                    },
+                                                );
+                                        }
+                                        Ok(())
                                     }
-                                    if current == end_index {
-                                        break;
-                                    }
-                                    current += 1;
-                                    if current <= beginning_index {
-                                        new_cursor_position += w.len() as u64;
-                                    }
-                                }
-                                StringType::Newline(c) | StringType::Whitespace(c) => {
-                                    if current <= beginning_index {
-                                        new_cursor_position += c.len() as u64;
-                                    }
-                                }
-                                StringType::Tab => {
-                                    if current <= beginning_index {
-                                        new_cursor_position += 1;
+                                    Edit::Range(beginning, end) => {
+                                        let beginning_index = base26_to_base10(&beginning);
+                                        if beginning_index.is_err() {
+                                            return Ok(());
+                                        }
+                                        let end_index = base26_to_base10(&end);
+                                        if end_index.is_err() {
+                                            return Ok(());
+                                        }
+                                        model.mode = Mode::Idle;
+                                        // SAFETY: just checked for none
+                                        let beginning_index = beginning_index.unwrap();
+                                        // SAFETY: just checked for none
+                                        let end_index = end_index.unwrap();
+                                        if end_index < beginning_index {
+                                            return Ok(());
+                                        }
+                                        let mut split_command = split_string(&command.input);
+                                        let mut current = 0;
+                                        let mut new_cursor_position = 0;
+                                        let mut indices_to_delete = Vec::new();
+                                        for (real_index, element) in
+                                            split_command.iter().enumerate()
+                                        {
+                                            match element {
+                                                StringType::Word(w) => {
+                                                    if current == beginning_index
+                                                        || current == end_index
+                                                    {
+                                                        indices_to_delete.push(real_index);
+                                                    }
+                                                    if current == end_index {
+                                                        break;
+                                                    }
+                                                    current += 1;
+                                                    if current <= beginning_index {
+                                                        new_cursor_position += w.len() as u64;
+                                                    }
+                                                }
+                                                StringType::Newline(c)
+                                                | StringType::Whitespace(c) => {
+                                                    if current <= beginning_index {
+                                                        new_cursor_position += c.len() as u64;
+                                                    }
+                                                }
+                                                StringType::Tab => {
+                                                    if current <= beginning_index {
+                                                        new_cursor_position += 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if indices_to_delete.is_empty() {
+                                            return Ok(());
+                                        }
+                                        split_command
+                                            .drain(indices_to_delete[0]..=indices_to_delete[1]);
+                                        let new_command = split_command
+                                            .iter()
+                                            .map(|s| s.as_str())
+                                            .collect::<Vec<&str>>()
+                                            .join("");
+                                        model.current_command = CurrentView::CommandWithoutOutput(
+                                            CommandWithoutOutput {
+                                                cursor_position: new_cursor_position,
+                                                input: new_command,
+                                            },
+                                        );
+                                        Ok(())
                                     }
                                 }
                             }
+                            _ => unreachable!(),
                         }
-                        if indices_to_delete.is_empty() {
+                    }
+                    Command::Select(number) => {
+                        if model.command_history.is_empty() {
                             return Ok(());
                         }
-                        split_command.drain(indices_to_delete[0]..=indices_to_delete[1]);
-                        let new_command = split_command
-                            .iter()
-                            .map(|s| s.as_str())
-                            .collect::<Vec<&str>>()
-                            .join("");
-                        model.current_command =
-                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                cursor_position: new_cursor_position,
-                                input: new_command,
-                            });
-                        Ok(())
-                    } else {
-                        if hint.is_empty() {
+
+                        if number.is_none() {
+                            model.set_current_view_from_command(0, String::new());
+                            model.mode = Mode::Idle;
                             return Ok(());
                         }
-                        let index = base26_to_base10(hint);
-                        if index.is_err() {
-                            return Ok(());
+
+                        let number = number.unwrap();
+                        if number < model.command_history.len() + model.pinned_commands.len() {
+                            if number < model.pinned_commands.len() {
+                                let completed_command = &model.pinned_commands[number];
+                                model.current_command =
+                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        input: completed_command.input.clone(),
+                                        cursor_position: completed_command.cursor_position,
+                                    });
+                                model.command_history_index = model.command_history.len();
+                            } else {
+                                let index = model.command_history.len()
+                                    + model.pinned_commands.len()
+                                    - number
+                                    - 1;
+                                let completed_command = &model.command_history[index];
+                                model.set_current_view_from_command(
+                                    completed_command.input.len() as u64,
+                                    completed_command.input.clone(),
+                                );
+                            };
                         }
-                        // SAFETY: just checked for err
-                        let index = index.unwrap();
                         model.mode = Mode::Idle;
-                        let mut split_command = split_string(&command.input);
+                        Ok(())
+                    }
+                    Command::JumpBefore(hint) => {
+                        match &model.current_command {
+                            CurrentView::CommandWithOutput(c) => {
+                                model.set_current_view_from_command(
+                                    c.input.len() as u64,
+                                    c.input.clone(),
+                                );
+                            }
+                            CurrentView::Output(_) => {
+                                // do nothing
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
+
+                        if hint.is_empty() {
+                            match &mut model.current_command {
+                                CurrentView::CommandWithoutOutput(command) => {
+                                    command.cursor_position = command.input.len() as u64;
+                                }
+                                _ => unreachable!(),
+                            }
+                            model.mode = Mode::Idle;
+                            return Ok(());
+                        }
+                        // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
+                        let index = base26_to_base10(&hint)?;
+                        model.mode = Mode::Idle;
+                        // SAFETY: Jumping Modes can only be entered if command has an input string
+                        let split_command =
+                            split_string(model.current_command.input_str().unwrap());
                         let mut current = 0;
                         let mut new_cursor_position = 0;
-                        let mut index_to_delete = None;
-                        for (real_index, element) in split_command.iter().enumerate() {
+                        for element in split_command.iter() {
                             match element {
                                 StringType::Word(w) => {
                                     if current == index {
-                                        index_to_delete = Some(real_index);
                                         break;
                                     }
                                     current += 1;
@@ -618,214 +724,198 @@ pub(crate) fn update(
                                 }
                             }
                         }
-                        if let Some(index_to_delete) = index_to_delete {
-                            split_command.remove(index_to_delete);
-
-                            let new_command = split_command
-                                .iter()
-                                .map(|s| s.as_str())
-                                .collect::<Vec<&str>>()
-                                .join("");
-
-                            model.current_command =
-                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                    cursor_position: new_cursor_position,
-                                    input: new_command,
-                                });
+                        match &mut model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                command.cursor_position = new_cursor_position;
+                                Ok(())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    Command::JumpAfter(hint) => {
+                        match &model.current_command {
+                            CurrentView::CommandWithOutput(c) => {
+                                model.set_current_view_from_command(
+                                    c.input.len() as u64,
+                                    c.input.clone(),
+                                );
+                            }
+                            CurrentView::Output(_) => {
+                                // do nothing
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
+                        if hint.is_empty() {
+                            match &mut model.current_command {
+                                CurrentView::CommandWithoutOutput(command) => {
+                                    command.cursor_position = command.input.len() as u64;
+                                }
+                                _ => unreachable!(),
+                            }
+                            model.mode = Mode::Idle;
+                            return Ok(());
+                        }
+                        let index = base26_to_base10(&hint)?;
+                        model.mode = Mode::Idle;
+                        // SAFETY: Jumping Modes can only be entered if command has an input string
+                        let split_command =
+                            split_string(model.current_command.input_str().unwrap());
+                        let mut current = 0;
+                        let mut new_cursor_position = 0;
+                        for element in split_command.iter() {
+                            match element {
+                                StringType::Word(w) => {
+                                    if current == index {
+                                        new_cursor_position += w.len() as u64;
+                                        break;
+                                    }
+                                    current += 1;
+                                    new_cursor_position += w.len() as u64;
+                                }
+                                StringType::Newline(c) | StringType::Whitespace(c) => {
+                                    new_cursor_position += c.len() as u64;
+                                }
+                                StringType::Tab => {
+                                    new_cursor_position += 1;
+                                }
+                            }
+                        }
+                        match &mut model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                command.cursor_position = new_cursor_position;
+                            }
+                            _ => unreachable!(),
                         }
                         Ok(())
                     }
-                }
-                _ => unreachable!(),
-            },
-            event::Event::Character(c) => {
-                if c.is_alphabetic() || c == ',' {
-                    hint.push(c);
-                }
-                Ok(())
-            }
-            event::Event::Backspace => {
-                hint.pop();
-                Ok(())
-            }
-            _ => {
-                // do nothing
-                Ok(())
-            }
-        },
-        // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
-        Mode::Quit => unreachable!(),
-        Mode::Selecting(number) => match event {
-            event::Event::Character(character) => {
-                if character.is_ascii_digit() {
-                    number.push(character)
-                }
-                Ok(())
-            }
-            event::Event::Enter => {
-                if number.is_empty() {
-                    model.set_current_view_from_command(0, String::new());
-                    model.mode = Mode::Idle;
-                    return Ok(());
-                }
-
-                // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
-                let number = number.parse::<usize>()?;
-                if number < model.command_history.len() + model.pinned_commands.len() {
-                    if number < model.pinned_commands.len() {
-                        let completed_command = &model.pinned_commands[number];
-                        model.current_command =
-                            CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                input: completed_command.input.clone(),
-                                cursor_position: completed_command.cursor_position,
-                            });
-                        model.command_history_index = model.command_history.len();
-                    } else {
-                        let index =
-                            model.command_history.len() + model.pinned_commands.len() - number - 1;
-                        let completed_command = &model.command_history[index];
-                        model.set_current_view_from_command(
-                            completed_command.input.len() as u64,
-                            completed_command.input.clone(),
-                        );
-                    };
-                }
-                model.mode = Mode::Idle;
-                Ok(())
-            }
-            event::Event::Backspace => {
-                number.pop();
-                Ok(())
-            }
-            event::Event::Esc | event::Event::CtrlS => {
-                model.mode = Mode::Idle;
-                Ok(())
-            }
-            _ => {
-                // do nothing
-                Ok(())
-            }
-        },
-        Mode::JumpingBefore(hint) => match event {
-            event::Event::Character(character) => {
-                if character.is_alphabetic() {
-                    hint.push(character)
-                }
-                Ok(())
-            }
-            event::Event::Backspace => {
-                hint.pop();
-                Ok(())
-            }
-            event::Event::Esc | event::Event::CtrlB => {
-                model.mode = Mode::Idle;
-                Ok(())
-            }
-            event::Event::Enter => {
-                if hint.is_empty() {
-                    match &mut model.current_command {
-                        CurrentView::CommandWithoutOutput(command) => {
-                            command.cursor_position = command.input.len() as u64;
-                        }
-                        _ => unreachable!(),
-                    }
-                    model.mode = Mode::Idle;
-                    return Ok(());
-                }
-                // we only accept digits so this must be a valid usize (unless it's too large, that is acceptable)
-                let index = base26_to_base10(hint)?;
-                model.mode = Mode::Idle;
-                // SAFETY: Jumping Modes can only be entered if command has an input string
-                let split_command = split_string(model.current_command.input_str().unwrap());
-                let mut current = 0;
-                let mut new_cursor_position = 0;
-                for element in split_command.iter() {
-                    match element {
-                        StringType::Word(w) => {
-                            if current == index {
-                                break;
+                    Command::Pin => {
+                        model.mode = Mode::Idle;
+                        match &model.current_command {
+                            CurrentView::CommandWithoutOutput(c) => {
+                                if c.input.is_empty() {
+                                    return Ok(());
+                                }
+                                let position = model
+                                    .pinned_commands
+                                    .iter()
+                                    .map(|pinned_command| pinned_command.input.clone())
+                                    .position(|past_command| past_command == c.input);
+                                if let Some(position) = position {
+                                    model.pinned_commands.remove(position);
+                                    Ok(())
+                                } else {
+                                    model.pinned_commands.push(CommandWithoutOutput {
+                                        input: c.input.clone(),
+                                        cursor_position: c.cursor_position,
+                                    });
+                                    Ok(())
+                                }
                             }
-                            current += 1;
-                            new_cursor_position += w.len() as u64;
-                        }
-                        StringType::Newline(c) | StringType::Whitespace(c) => {
-                            new_cursor_position += c.len() as u64;
-                        }
-                        StringType::Tab => {
-                            new_cursor_position += 1;
+                            CurrentView::Output(_) => {
+                                // do nothing
+                                Ok(())
+                            }
+                            CurrentView::CommandWithOutput(c) => {
+                                if c.input.is_empty() {
+                                    return Ok(());
+                                }
+                                let position = model
+                                    .pinned_commands
+                                    .iter()
+                                    .map(|pinned_command| pinned_command.input.clone())
+                                    .position(|past_command| past_command == c.input);
+                                if let Some(position) = position {
+                                    model.pinned_commands.remove(position);
+                                    Ok(())
+                                } else {
+                                    model.pinned_commands.push(CommandWithoutOutput {
+                                        input: c.input.clone(),
+                                        cursor_position: c.input.len() as u64,
+                                    });
+                                    Ok(())
+                                }
+                            }
                         }
                     }
-                }
-                match &mut model.current_command {
-                    CurrentView::CommandWithoutOutput(command) => {
-                        command.cursor_position = new_cursor_position;
+                    Command::CopyOutput => {
+                        model.mode = Mode::Idle;
+                        match model.current_command {
+                            CurrentView::CommandWithoutOutput(_) => {
+                                // do nothing
+                                Ok(())
+                            }
+                            CurrentView::CommandWithOutput(ref command) => {
+                                clipboard.set_text(command.output.as_str())?;
+                                Ok(())
+                            }
+                            CurrentView::Output(ref command) => {
+                                clipboard.set_text(command.as_str())?;
+                                Ok(())
+                            }
+                        }
+                    }
+                    Command::ToggleHints => {
+                        model.config.hint_state = match model.config.hint_state {
+                            HintState::ShowHints => HintState::HideHints,
+                            HintState::HideHints => HintState::ShowHints,
+                        };
+                        model.mode = Mode::Idle;
                         Ok(())
                     }
-                    _ => unreachable!(),
-                }
-            }
-            _ => {
-                // do nothing
-                Ok(())
-            }
-        },
-        Mode::JumpingAfter(hint) => match event {
-            event::Event::Character(character) => {
-                if character.is_alphabetic() {
-                    hint.push(character)
-                }
-                Ok(())
-            }
-            event::Event::Backspace => {
-                hint.pop();
-                Ok(())
-            }
-            event::Event::Esc | event::Event::CtrlB => {
-                model.mode = Mode::Idle;
-                Ok(())
-            }
-            event::Event::Enter => {
-                if hint.is_empty() {
-                    match &mut model.current_command {
-                        CurrentView::CommandWithoutOutput(command) => {
-                            command.cursor_position = command.input.len() as u64;
-                        }
-                        _ => unreachable!(),
-                    }
-                    model.mode = Mode::Idle;
-                    return Ok(());
-                }
-                let index = base26_to_base10(hint)?;
-                model.mode = Mode::Idle;
-                // SAFETY: Jumping Modes can only be entered if command has an input string
-                let split_command = split_string(model.current_command.input_str().unwrap());
-                let mut current = 0;
-                let mut new_cursor_position = 0;
-                for element in split_command.iter() {
-                    match element {
-                        StringType::Word(w) => {
-                            if current == index {
-                                new_cursor_position += w.len() as u64;
-                                break;
+                    Command::Paste => {
+                        model.mode = Mode::Idle;
+                        match &model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                let text_to_insert = clipboard.get_text()?;
+                                if command.cursor_position == command.input.len() as u64 {
+                                    let new_command =
+                                        format!("{}{}", command.input, text_to_insert);
+                                    model.current_command =
+                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                            input: new_command,
+                                            cursor_position: command.cursor_position
+                                                + text_to_insert.len() as u64,
+                                        });
+                                    Ok(())
+                                } else {
+                                    let (first, second) =
+                                        command.input.split_at(command.cursor_position as usize);
+                                    let new_command =
+                                        format!("{}{}{}", first, text_to_insert, second);
+                                    model.current_command =
+                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                            input: new_command,
+                                            cursor_position: command.cursor_position
+                                                + text_to_insert.len() as u64,
+                                        });
+                                    Ok(())
+                                }
                             }
-                            current += 1;
-                            new_cursor_position += w.len() as u64;
-                        }
-                        StringType::Newline(c) | StringType::Whitespace(c) => {
-                            new_cursor_position += c.len() as u64;
-                        }
-                        StringType::Tab => {
-                            new_cursor_position += 1;
+                            CurrentView::CommandWithOutput(command) => {
+                                let text_to_insert = clipboard.get_text()?;
+                                let new_command = format!("{}{}", command.input, text_to_insert);
+                                model.current_command =
+                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        input: new_command,
+                                        cursor_position: command.input.len() as u64
+                                            + text_to_insert.len() as u64,
+                                    });
+                                Ok(())
+                            }
+                            CurrentView::Output(_) => {
+                                let new_command = clipboard.get_text()?;
+                                model.current_command =
+                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        cursor_position: new_command.len() as u64,
+                                        input: new_command,
+                                    });
+                                model.command_history_index = model.command_history.len();
+                                Ok(())
+                            }
                         }
                     }
                 }
-                match &mut model.current_command {
-                    CurrentView::CommandWithoutOutput(command) => {
-                        command.cursor_position = new_cursor_position;
-                    }
-                    _ => unreachable!(),
-                }
-                Ok(())
             }
             _ => {
                 // do nothing

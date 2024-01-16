@@ -105,10 +105,7 @@ fn split_string(input: &str) -> Vec<StringType> {
 enum Mode {
     #[default]
     Idle,
-    Editing(String),
-    Selecting(String),
-    JumpingBefore(String),
-    JumpingAfter(String),
+    Command(String),
     Quit,
 }
 

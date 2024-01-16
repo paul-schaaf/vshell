@@ -11,7 +11,7 @@
 # Compatibility
 -  [x] mac
 -  [?] linux 
--  [?] windows
+-  [x] windows - although some commands built into the windows shell may not work because on windows they are builtins but they are not built into vshell itself (yet?)
   
 # Features
 Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon commands that use the shell's features.

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use arboard::Clipboard;
 
 mod event;
@@ -122,19 +124,41 @@ struct Config {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-enum Output {
+struct Output {
+    origin: Origin,
+    output_type: OutputType,
+}
+
+impl Output {
+    fn as_str(&self) -> &str {
+        match &self.output_type {
+            OutputType::Success(output) => output.as_str(),
+            OutputType::Error(output) => output.as_str(),
+            OutputType::Empty => "",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+enum OutputType {
     Success(String),
     Error(String),
     #[default]
     Empty,
 }
 
-impl Output {
-    fn as_str(&self) -> &str {
+#[derive(Debug, Clone, Default, PartialEq)]
+enum Origin {
+    #[default]
+    Vshell,
+    Other(String),
+}
+
+impl fmt::Display for Origin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Output::Success(output) => output.as_str(),
-            Output::Error(output) => output.as_str(),
-            Output::Empty => "",
+            Self::Vshell => write!(f, "vshell"),
+            Self::Other(origin) => write!(f, "{}", origin),
         }
     }
 }
@@ -149,6 +173,55 @@ struct CommandWithoutOutput {
 struct CompletedCommand {
     input: String,
     output: Output,
+}
+
+impl CompletedCommand {
+    fn new(
+        input: String,
+        output: Result<std::process::Output, std::io::Error>,
+        origin: Origin,
+    ) -> Self {
+        CompletedCommand {
+            input: input.clone(),
+            output: {
+                match output {
+                    Ok(executed_command) => {
+                        if executed_command.status.success() {
+                            Output {
+                                origin,
+                                output_type: OutputType::Success(
+                                    String::from_utf8_lossy(&executed_command.stdout).to_string(),
+                                ),
+                            }
+                        } else {
+                            Output {
+                                origin,
+                                output_type: OutputType::Error(
+                                    String::from_utf8_lossy(&executed_command.stderr).to_string(),
+                                ),
+                            }
+                        }
+                    }
+                    Err(executed_command) => {
+                        if executed_command.kind() == std::io::ErrorKind::NotFound {
+                            Output {
+                                origin,
+                                output_type: OutputType::Error(format!(
+                                    "Command not found: {}",
+                                    input
+                                )),
+                            }
+                        } else {
+                            Output {
+                                origin,
+                                output_type: OutputType::Error(executed_command.to_string()),
+                            }
+                        }
+                    }
+                }
+            },
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

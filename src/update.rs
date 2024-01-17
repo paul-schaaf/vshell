@@ -2,7 +2,7 @@ use arboard::Clipboard;
 
 use crate::{
     event, split_string, CommandWithoutOutput, CompletedCommand, CurrentView, HintState, Mode,
-    Model, Output, StringType,
+    Model, Origin, Output, OutputType, StringType,
 };
 
 fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
@@ -27,6 +27,7 @@ enum Command {
     CopyOutput,
     Paste,
     ToggleHints,
+    ShellExecute(String),
 }
 
 pub enum Edit {
@@ -147,6 +148,13 @@ impl TryFrom<&str> for Command {
             "p" | "paste" => Ok(Command::Paste),
             "copyoutput" => Ok(Command::CopyOutput),
             "togglehints" => Ok(Command::ToggleHints),
+            "se" | "shellexecute" => {
+                if split_input.len() != 2 {
+                    return Err("Invalid Command");
+                }
+
+                Ok(Command::ShellExecute(split_input[1].to_string()))
+            }
             _ => Err("Invalid Command"),
         }
     }
@@ -209,22 +217,38 @@ pub(crate) fn update(
                     Some(home) => match std::env::set_current_dir(home) {
                         Ok(_) => CompletedCommand {
                             input: command_input.to_string(),
-                            output: Output::Success(String::new()),
+                            output: Output {
+                                origin: Origin::Vshell,
+                                output_type: OutputType::Success(String::new()),
+                            },
                         },
                         Err(e) => CompletedCommand {
                             input: command_input.to_string(),
-                            output: Output::Error(format!("cd: {}", e)),
+                            output: Output {
+                                origin: Origin::Vshell,
+                                output_type: OutputType::Error(format!("cd: {}", e)),
+                            },
                         },
                     },
                     None => CompletedCommand {
                         input: command_input.to_string(),
-                        output: Output::Error("cd: could not find home directory".to_string()),
+                        output: Output {
+                            origin: Origin::Vshell,
+                            output_type: OutputType::Error(
+                                "cd: could not find home directory".to_string(),
+                            ),
+                        },
                     },
                 }
             } else if command_list.len() != 2 {
                 CompletedCommand {
                     input: command_input.to_string(),
-                    output: Output::Error("cd: incorrect number of arguments".to_string()),
+                    output: Output {
+                        origin: Origin::Vshell,
+                        output_type: OutputType::Error(
+                            "cd: incorrect number of arguments".to_string(),
+                        ),
+                    },
                 }
             } else if command_list[1].contains('~') {
                 match dirs::home_dir() {
@@ -233,28 +257,45 @@ pub(crate) fn update(
                         match std::env::set_current_dir(new_path) {
                             Ok(_) => CompletedCommand {
                                 input: command_input.to_string(),
-                                output: Output::Success(String::new()),
+                                output: Output {
+                                    origin: Origin::Vshell,
+                                    output_type: OutputType::Success(String::new()),
+                                },
                             },
                             Err(e) => CompletedCommand {
                                 input: command_input.to_string(),
-                                output: Output::Error(format!("cd: {}", e)),
+                                output: Output {
+                                    origin: Origin::Vshell,
+                                    output_type: OutputType::Error(format!("cd: {}", e)),
+                                },
                             },
                         }
                     }
                     None => CompletedCommand {
                         input: command_input.to_string(),
-                        output: Output::Error("cd: could not find home directory".to_string()),
+                        output: Output {
+                            origin: Origin::Vshell,
+                            output_type: OutputType::Error(
+                                "cd: could not find home directory".to_string(),
+                            ),
+                        },
                     },
                 }
             } else {
                 match std::env::set_current_dir(&command_list[1]) {
                     Ok(_) => CompletedCommand {
                         input: command_input.to_string(),
-                        output: Output::Success(String::new()),
+                        output: Output {
+                            origin: Origin::Vshell,
+                            output_type: OutputType::Success(String::new()),
+                        },
                     },
                     Err(e) => CompletedCommand {
                         input: command_input.to_string(),
-                        output: Output::Error(format!("cd: {}", e)),
+                        output: Output {
+                            origin: Origin::Vshell,
+                            output_type: OutputType::Error(format!("cd: {}", e)),
+                        },
                     },
                 }
             }
@@ -267,32 +308,7 @@ pub(crate) fn update(
                         .collect::<Vec<&String>>(),
                 )
                 .output();
-
-            CompletedCommand {
-                input: command_input.to_string(),
-                output: {
-                    match executed_command {
-                        Ok(executed_command) => {
-                            if executed_command.status.success() {
-                                Output::Success(
-                                    String::from_utf8_lossy(&executed_command.stdout).to_string(),
-                                )
-                            } else {
-                                Output::Error(
-                                    String::from_utf8_lossy(&executed_command.stderr).to_string(),
-                                )
-                            }
-                        }
-                        Err(executed_command) => {
-                            if executed_command.kind() == std::io::ErrorKind::NotFound {
-                                Output::Error(format!("Command not found: {}", command_list[0]))
-                            } else {
-                                Output::Error(executed_command.to_string())
-                            }
-                        }
-                    }
-                },
-            }
+            CompletedCommand::new(command_input.to_string(), executed_command, Origin::Vshell)
         }
     }
 
@@ -351,7 +367,7 @@ pub(crate) fn update(
                     }
                     CurrentView::CommandWithOutput(command) => {
                         let completed_command = execute_command(command.input.as_str());
-                        model.command_history.push(command.clone());
+                        model.command_history.push(completed_command.clone());
                         model.current_command =
                             CurrentView::Output(completed_command.output.clone());
                     }
@@ -914,6 +930,58 @@ pub(crate) fn update(
                                 Ok(())
                             }
                         }
+                    }
+                    Command::ShellExecute(shell) => {
+                        fn executed_shell_command(shell: &str, command: &str) -> CompletedCommand {
+                            let executed_command = std::process::Command::new(shell)
+                                .arg("-c")
+                                .arg(command)
+                                .output();
+
+                            CompletedCommand::new(
+                                command.to_string(),
+                                executed_command,
+                                Origin::Other(shell.to_string()),
+                            )
+                        }
+
+                        model.mode = Mode::Idle;
+                        match &mut model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                if command.input.is_empty() {
+                                    return Ok(());
+                                }
+                                if has_open_quote(&command.input).is_some() {
+                                    command.input.push('\n');
+                                    command.cursor_position = command.input.len() as u64;
+                                    return Ok(());
+                                }
+                                // SAFETY: we just checked for empty so there must be at least 1 char
+                                if command.input.ends_with('\\') {
+                                    command.input.push('\n');
+                                    command.cursor_position = command.input.len() as u64;
+                                    return Ok(());
+                                }
+
+                                let completed_command =
+                                    executed_shell_command(&shell, command.input.as_str());
+                                model.command_history.push(completed_command.clone());
+                                model.current_command =
+                                    CurrentView::Output(completed_command.output.clone());
+                            }
+                            CurrentView::CommandWithOutput(command) => {
+                                let completed_command =
+                                    executed_shell_command(&shell, command.input.as_str());
+                                model.command_history.push(completed_command.clone());
+                                model.current_command =
+                                    CurrentView::Output(completed_command.output.clone());
+                            }
+                            CurrentView::Output(_) => {
+                                // do nothing
+                            }
+                        };
+                        model.command_history_index = model.command_history.len();
+                        Ok(())
                     }
                 }
             }

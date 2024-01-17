@@ -4,7 +4,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::{split_string, CurrentView, Mode, Model, Output, StringType};
+use crate::{split_string, CurrentView, Mode, Model, OutputType, StringType};
 
 pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
     let outer_layout = ratatui::layout::Layout::default()
@@ -490,22 +490,32 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
 }
 
 fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
-    let (output, block) = match &model.current_command {
-        CurrentView::CommandWithoutOutput(_) => (None, Block::new().white().on_black().bold()),
-        CurrentView::Output(o) => match o {
-            Output::Success(_) | Output::Empty => {
-                (Some(o.as_str()), Block::new().white().on_black().bold())
-            }
-            Output::Error(_) => (Some(o.as_str()), Block::new().red().on_black().bold()),
+    let (output, block, origin) = match &model.current_command {
+        CurrentView::CommandWithoutOutput(_) => {
+            (None, Block::new().white().on_black().bold(), None)
+        }
+        CurrentView::Output(o) => match o.output_type {
+            OutputType::Success(_) | OutputType::Empty => (
+                Some(o.as_str()),
+                Block::new().white().on_black().bold(),
+                Some(o.origin.clone()),
+            ),
+            OutputType::Error(_) => (
+                Some(o.as_str()),
+                Block::new().red().on_black().bold(),
+                Some(o.origin.clone()),
+            ),
         },
-        CurrentView::CommandWithOutput(o) => match o.output {
-            Output::Success(_) | Output::Empty => (
+        CurrentView::CommandWithOutput(o) => match o.output.output_type {
+            OutputType::Success(_) | OutputType::Empty => (
                 Some(o.output.as_str()),
                 Block::new().white().on_black().bold(),
+                Some(o.output.origin.clone()),
             ),
-            Output::Error(_) => (
+            OutputType::Error(_) => (
                 Some(o.output.as_str()),
                 Block::new().red().on_black().bold(),
+                Some(o.output.origin.clone()),
             ),
         },
     };
@@ -521,17 +531,35 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
         frame.render_widget(block.clone().borders(Borders::ALL), layout);
     }
 
-    frame.render_widget(
-        Paragraph::new("Output")
-            .block(block)
-            .wrap(Wrap { trim: false }),
-        Rect {
-            x: layout.x,
-            y: layout.y,
-            width: "Output".len() as u16,
-            height: 1,
-        },
-    );
+    match origin {
+        Some(shell) => {
+            let heading = format!("Output({})", shell);
+            frame.render_widget(
+                Paragraph::new(heading.as_str())
+                    .block(block)
+                    .wrap(Wrap { trim: false }),
+                Rect {
+                    x: layout.x,
+                    y: layout.y,
+                    width: heading.len() as u16,
+                    height: 1,
+                },
+            );
+        }
+        None => {
+            frame.render_widget(
+                Paragraph::new("Output")
+                    .block(block)
+                    .wrap(Wrap { trim: false }),
+                Rect {
+                    x: layout.x,
+                    y: layout.y,
+                    width: "Output".len() as u16,
+                    height: 1,
+                },
+            );
+        }
+    }
 }
 
 #[cfg(test)]

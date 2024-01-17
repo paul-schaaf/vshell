@@ -186,8 +186,8 @@ impl TryFrom<&str> for Command {
             }
             "pin" => Ok(Command::Pin),
             "p" | "paste" => Ok(Command::Paste),
-            "copyoutput" => Ok(Command::CopyOutput),
-            "togglehints" => Ok(Command::ToggleHints),
+            "co" | "copyoutput" => Ok(Command::CopyOutput),
+            "th" | "togglehints" => Ok(Command::ToggleHints),
             "se" | "shellexecute" => {
                 if split_input.len() != 2 {
                     return Err("Invalid Command");

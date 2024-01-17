@@ -1,8 +1,8 @@
 use arboard::Clipboard;
 
 use crate::{
-    event, split_string, CommandWithoutOutput, CompletedCommand, CurrentView, HintState, Mode,
-    Model, Origin, Output, OutputType, StringType,
+    event, get_current_directory, split_string, CommandWithoutOutput, CompletedCommand,
+    CurrentView, HintState, Mode, Model, Origin, Output, OutputType, StringType,
 };
 
 fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
@@ -29,6 +29,7 @@ enum Command {
     ToggleHints,
     ShellExecute(String),
     Replace(Replace),
+    SwitchHistory,
 }
 
 enum Replace {
@@ -211,6 +212,7 @@ impl TryFrom<&str> for Command {
                     replace_args.remove(0),
                 )))
             }
+            "sh" | "switchhistory" => Ok(Command::SwitchHistory),
             _ => Err("Invalid Command"),
         }
     }
@@ -432,6 +434,11 @@ pub(crate) fn update(
                     }
                 };
                 model.command_history_index = model.command_history.len();
+                let current_directory = get_current_directory();
+                // SAFETY: we add the initial directory on startup so there must be a last directory
+                if current_directory != *model.directory_history.last().unwrap() {
+                    model.directory_history.push(current_directory);
+                }
                 Ok(())
             }
             event::Event::Up => {
@@ -711,37 +718,56 @@ pub(crate) fn update(
                         }
                     }
                     Command::Select(number) => {
-                        if number.is_none() {
-                            model.set_current_view_from_command(0, String::new());
-                            model.mode = Mode::Idle;
-                            return Ok(());
-                        }
+                        match model.config.history_type {
+                            crate::HistoryType::CommandHistory => {
+                                if number.is_none() {
+                                    model.set_current_view_from_command(0, String::new());
+                                    model.mode = Mode::Idle;
+                                    return Ok(());
+                                }
 
-                        if model.command_history.is_empty() {
-                            return Ok(());
-                        }
+                                if model.command_history.is_empty() {
+                                    return Ok(());
+                                }
 
-                        let number = number.unwrap();
-                        if number < model.command_history.len() + model.pinned_commands.len() {
-                            if number < model.pinned_commands.len() {
-                                let completed_command = &model.pinned_commands[number];
-                                model.current_command =
-                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                        input: completed_command.input.clone(),
-                                        cursor_position: completed_command.cursor_position,
-                                    });
-                                model.command_history_index = model.command_history.len();
-                            } else {
-                                let index = model.command_history.len()
-                                    + model.pinned_commands.len()
-                                    - number
-                                    - 1;
-                                let completed_command = &model.command_history[index];
-                                model.set_current_view_from_command(
-                                    completed_command.input.len() as u64,
-                                    completed_command.input.clone(),
-                                );
-                            };
+                                let number = number.unwrap();
+                                if number
+                                    < model.command_history.len() + model.pinned_commands.len()
+                                {
+                                    if number < model.pinned_commands.len() {
+                                        let completed_command = &model.pinned_commands[number];
+                                        model.current_command = CurrentView::CommandWithoutOutput(
+                                            CommandWithoutOutput {
+                                                input: completed_command.input.clone(),
+                                                cursor_position: completed_command.cursor_position,
+                                            },
+                                        );
+                                        model.command_history_index = model.command_history.len();
+                                    } else {
+                                        let index = model.command_history.len()
+                                            + model.pinned_commands.len()
+                                            - number
+                                            - 1;
+                                        let completed_command = &model.command_history[index];
+                                        model.set_current_view_from_command(
+                                            completed_command.input.len() as u64,
+                                            completed_command.input.clone(),
+                                        );
+                                    };
+                                }
+                            }
+                            crate::HistoryType::DirectoryHistory => {
+                                let number = number.unwrap();
+                                if number < model.directory_history.len() {
+                                    let directory = &model.directory_history[number];
+                                    let new_command = format!("cd \"{}\"", directory);
+                                    let completed_command = execute_command(new_command.as_str());
+                                    model.command_history.push(completed_command.clone());
+                                    model.command_history_index = model.command_history.len();
+                                    model.current_command =
+                                        CurrentView::Output(completed_command.output.clone());
+                                }
+                            }
                         }
                         model.mode = Mode::Idle;
                         Ok(())
@@ -1036,6 +1062,11 @@ pub(crate) fn update(
                                 // do nothing
                             }
                         };
+                        let current_directory = get_current_directory();
+                        // SAFETY: we add the initial directory on startup so there must be a last directory
+                        if current_directory != *model.directory_history.last().unwrap() {
+                            model.directory_history.push(current_directory);
+                        }
                         model.command_history_index = model.command_history.len();
                         Ok(())
                     }
@@ -1118,6 +1149,18 @@ pub(crate) fn update(
                             }
                         },
                     },
+                    Command::SwitchHistory => {
+                        match model.config.history_type {
+                            crate::HistoryType::CommandHistory => {
+                                model.config.history_type = crate::HistoryType::DirectoryHistory;
+                            }
+                            crate::HistoryType::DirectoryHistory => {
+                                model.config.history_type = crate::HistoryType::CommandHistory;
+                            }
+                        }
+                        model.mode = Mode::Idle;
+                        Ok(())
+                    }
                 }
             }
             _ => {

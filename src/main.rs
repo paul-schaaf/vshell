@@ -7,12 +7,20 @@ mod tui;
 mod update;
 mod view;
 
+fn get_current_directory() -> String {
+    std::env::current_dir().map_or_else(
+        |_| "could not access directory".to_string(),
+        |d| d.to_string_lossy().to_string(),
+    )
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
     let mut clipboard = Clipboard::new()?;
     let mut terminal = tui::init_terminal()?;
     let mut model = Model::default();
+    model.directory_history.push(get_current_directory());
 
     while !model.should_quit() {
         terminal.draw(|frame| view::view(&model, frame))?;
@@ -121,6 +129,14 @@ enum HintState {
 #[derive(Debug, PartialEq, Default)]
 struct Config {
     hint_state: HintState,
+    history_type: HistoryType,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub enum HistoryType {
+    #[default]
+    CommandHistory,
+    DirectoryHistory,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -261,6 +277,7 @@ struct Model {
     config: Config,
     command_history: Vec<CompletedCommand>,
     command_history_index: usize,
+    directory_history: Vec<String>,
     pinned_commands: Vec<CommandWithoutOutput>,
     current_command: CurrentView,
 }

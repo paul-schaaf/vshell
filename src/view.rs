@@ -41,77 +41,14 @@ pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
 
     render_output(frame, model, outer_layout[1]);
     render_input(frame, model, left_layout[0]);
-
-    let pinned_commands = model
-        .pinned_commands
-        .iter()
-        .enumerate()
-        .map(|(index, command)| format!("{}: {}", index, command.input))
-        .collect::<Vec<String>>();
-
-    for (index, command) in pinned_commands.iter().enumerate() {
-        frame.render_widget(
-            Paragraph::new(command.as_str())
-                .block(Block::new().white().on_black())
-                .wrap(Wrap { trim: false }),
-            Rect {
-                x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1 + index as u16,
-                width: left_layout[1].width - 2,
-                height: 1,
-            },
-        );
+    match model.config.history_type {
+        crate::HistoryType::CommandHistory => {
+            render_command_history(frame, model, left_layout[1]);
+        }
+        crate::HistoryType::DirectoryHistory => {
+            render_directory_history(frame, model, left_layout[1]);
+        }
     }
-
-    if !pinned_commands.is_empty() {
-        frame.render_widget(
-            ratatui::widgets::Paragraph::new("-".repeat(left_layout[1].width as usize - 2))
-                .block(Block::new().white().on_black().bold())
-                .wrap(Wrap { trim: false }),
-            Rect {
-                x: left_layout[1].x + 1,
-                y: left_layout[1].y + 1 + pinned_commands.len() as u16,
-                width: left_layout[1].width - 2,
-                height: 1,
-            },
-        );
-    }
-
-    if !model.command_history.is_empty() {
-        let commands = model
-            .command_history
-            .iter()
-            .rev()
-            .enumerate()
-            .map(|(index, command)| format!("{}: {}", index + pinned_commands.len(), command.input))
-            .collect::<Vec<String>>()
-            .join("\n");
-
-        frame.render_widget(
-            Paragraph::new(commands)
-                .block(Block::new().white().on_black())
-                .wrap(Wrap { trim: false }),
-            Rect {
-                x: left_layout[1].x + 1,
-                y: left_layout[1].y
-                    + 1
-                    + pinned_commands.len() as u16
-                    + if pinned_commands.is_empty() { 0 } else { 1 },
-                width: left_layout[1].width - 2,
-                height: left_layout[1].height
-                    - 2
-                    - pinned_commands.len() as u16
-                    - if pinned_commands.is_empty() { 0 } else { 1 },
-            },
-        );
-    }
-
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new("History")
-            .block(Block::new().white().on_black().bold())
-            .wrap(Wrap { trim: false }),
-        left_layout[1],
-    );
 
     if let Mode::Command(command) = &model.mode {
         frame.render_widget(
@@ -560,6 +497,109 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
             );
         }
     }
+}
+
+fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+    let pinned_commands = model
+        .pinned_commands
+        .iter()
+        .enumerate()
+        .map(|(index, command)| format!("{}: {}", index, command.input))
+        .collect::<Vec<String>>();
+
+    for (index, command) in pinned_commands.iter().enumerate() {
+        frame.render_widget(
+            Paragraph::new(command.as_str())
+                .block(Block::new().white().on_black())
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: layout.x + 1,
+                y: layout.y + 1 + index as u16,
+                width: layout.width - 2,
+                height: 1,
+            },
+        );
+    }
+
+    if !pinned_commands.is_empty() {
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new("-".repeat(layout.width as usize - 2))
+                .block(Block::new().white().on_black().bold())
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: layout.x + 1,
+                y: layout.y + 1 + pinned_commands.len() as u16,
+                width: layout.width - 2,
+                height: 1,
+            },
+        );
+    }
+
+    if !model.command_history.is_empty() {
+        let commands = model
+            .command_history
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(index, command)| format!("{}: {}", index + pinned_commands.len(), command.input))
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        frame.render_widget(
+            Paragraph::new(commands)
+                .block(Block::new().white().on_black())
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: layout.x + 1,
+                y: layout.y
+                    + 1
+                    + pinned_commands.len() as u16
+                    + if pinned_commands.is_empty() { 0 } else { 1 },
+                width: layout.width - 2,
+                height: layout.height
+                    - 2
+                    - pinned_commands.len() as u16
+                    - if pinned_commands.is_empty() { 0 } else { 1 },
+            },
+        );
+    }
+
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new("History")
+            .block(Block::new().white().on_black().bold())
+            .wrap(Wrap { trim: false }),
+        layout,
+    );
+}
+
+fn render_directory_history(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+    let directories = model
+        .directory_history
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(index, directory)| format!("{}: {}", index, directory))
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    frame.render_widget(
+        Paragraph::new(directories)
+            .block(Block::new().white().on_black().bold())
+            .wrap(Wrap { trim: false }),
+        Rect {
+            x: layout.x + 1,
+            y: layout.y + 1,
+            width: layout.width - 2,
+            height: layout.height - 2,
+        },
+    );
+
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new("Directory History")
+            .block(Block::new().white().on_black().bold())
+            .wrap(Wrap { trim: false }),
+        layout,
+    );
 }
 
 #[cfg(test)]

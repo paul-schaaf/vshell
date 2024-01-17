@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 use arboard::Clipboard;
 
@@ -7,20 +7,13 @@ mod tui;
 mod update;
 mod view;
 
-fn get_current_directory() -> String {
-    std::env::current_dir().map_or_else(
-        |_| "could not access directory".to_string(),
-        |d| d.to_string_lossy().to_string(),
-    )
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
 
     let mut clipboard = Clipboard::new()?;
     let mut terminal = tui::init_terminal()?;
     let mut model = Model::default();
-    model.directory_history.push(get_current_directory());
+    model.directory_history.push(std::env::current_dir()?);
 
     while !model.should_quit() {
         terminal.draw(|frame| view::view(&model, frame))?;
@@ -277,7 +270,7 @@ struct Model {
     config: Config,
     command_history: Vec<CompletedCommand>,
     command_history_index: usize,
-    directory_history: Vec<String>,
+    directory_history: Vec<PathBuf>,
     pinned_commands: Vec<CommandWithoutOutput>,
     current_command: CurrentView,
 }

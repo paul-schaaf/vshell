@@ -103,8 +103,8 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
         frame.render_widget(
             Block::new().on_green(),
             Rect {
-                x: 1,
-                y: 1,
+                x,
+                y,
                 width: 1,
                 height: 1,
             },
@@ -413,17 +413,39 @@ fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
         }
     }
 
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new("Input")
-            .block(Block::new().white().on_black().bold())
-            .wrap(Wrap { trim: false }),
-        Rect {
-            x: 0,
-            y: 0,
-            width: "Input".len() as u16,
-            height: 1,
-        },
-    );
+    // SAFETY: shell will crash if it cannot access current dir at beginning
+    // and current dir is in history so if we get here there is a last element
+    let current_directory = model.directory_history.last().unwrap();
+    let directory_string = current_directory.to_string_lossy();
+    let directory_header = format!("Input - {}", directory_string);
+    if directory_header.len() as u16 > layout.width - 1 {
+        let (_, end) = directory_header.split_at(directory_header.len() - (layout.width as usize));
+        let (_, end) = end.split_at(12);
+        let header = format!("Input - ...{}", end);
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(header.as_str())
+                .block(Block::new().white().on_black().bold())
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: 0,
+                y: 0,
+                width: header.len() as u16,
+                height: 1,
+            },
+        );
+    } else {
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(directory_header.as_str())
+                .block(Block::new().white().on_black().bold())
+                .wrap(Wrap { trim: false }),
+            Rect {
+                x: 0,
+                y: 0,
+                width: directory_header.len() as u16,
+                height: 1,
+            },
+        );
+    }
 }
 
 fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
@@ -578,7 +600,7 @@ fn render_directory_history(frame: &mut ratatui::Frame, model: &Model, layout: R
         .iter()
         .rev()
         .enumerate()
-        .map(|(index, directory)| format!("{}: {}", index, directory))
+        .map(|(index, directory)| format!("{}: {}", index, directory.to_string_lossy()))
         .collect::<Vec<String>>()
         .join("\n");
 

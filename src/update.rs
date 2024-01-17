@@ -1,8 +1,8 @@
 use arboard::Clipboard;
 
 use crate::{
-    event, get_current_directory, split_string, CommandWithoutOutput, CompletedCommand,
-    CurrentView, HintState, Mode, Model, Origin, Output, OutputType, StringType,
+    event, split_string, CommandWithoutOutput, CompletedCommand, CurrentView, HintState, Mode,
+    Model, Origin, Output, OutputType, StringType,
 };
 
 fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
@@ -434,7 +434,11 @@ pub(crate) fn update(
                     }
                 };
                 model.command_history_index = model.command_history.len();
-                let current_directory = get_current_directory();
+                let current_directory = std::env::current_dir();
+                if current_directory.is_err() {
+                    return Ok(());
+                }
+                let current_directory = current_directory.unwrap();
                 // SAFETY: we add the initial directory on startup so there must be a last directory
                 if current_directory != *model.directory_history.last().unwrap() {
                     model.directory_history.push(current_directory);
@@ -760,7 +764,8 @@ pub(crate) fn update(
                                 let number = number.unwrap();
                                 if number < model.directory_history.len() {
                                     let directory = &model.directory_history[number];
-                                    let new_command = format!("cd \"{}\"", directory);
+                                    let new_command =
+                                        format!("cd \"{}\"", directory.to_string_lossy());
                                     let completed_command = execute_command(new_command.as_str());
                                     model.command_history.push(completed_command.clone());
                                     model.command_history_index = model.command_history.len();
@@ -1062,7 +1067,12 @@ pub(crate) fn update(
                                 // do nothing
                             }
                         };
-                        let current_directory = get_current_directory();
+                        let current_directory = std::env::current_dir();
+                        if current_directory.is_err() {
+                            model.command_history_index = model.command_history.len();
+                            return Ok(());
+                        }
+                        let current_directory = current_directory.unwrap();
                         // SAFETY: we add the initial directory on startup so there must be a last directory
                         if current_directory != *model.directory_history.last().unwrap() {
                             model.directory_history.push(current_directory);

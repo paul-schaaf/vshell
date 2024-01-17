@@ -28,9 +28,15 @@ enum Command {
     Paste,
     ToggleHints,
     ShellExecute(String),
+    Replace(Replace),
 }
 
-pub enum Edit {
+enum Replace {
+    Single(String, String),
+    Global(String, String),
+}
+
+enum Edit {
     Single(String),
     Range(String, String),
 }
@@ -39,6 +45,40 @@ impl TryFrom<&str> for Command {
     type Error = &'static str;
 
     fn try_from(input: &str) -> Result<Self, Self::Error> {
+        fn create_replace_string<'a>(
+            split_input: &'a [&str],
+        ) -> Result<Vec<String>, <Command as TryFrom<&'a str>>::Error> {
+            fn split_string(s: &str) -> Vec<String> {
+                let mut result = Vec::new();
+                let mut segment = String::new();
+                let mut escaped = false;
+
+                for c in s.chars() {
+                    if c == '\\' && !escaped {
+                        escaped = true;
+                    } else if c == ',' && !escaped {
+                        result.push(segment.clone());
+                        segment.clear();
+                    } else {
+                        segment.push(c);
+                        escaped = false;
+                    }
+                }
+
+                result.push(segment);
+
+                result
+            }
+
+            if split_input.len() < 2 {
+                return Err("Invalid Command");
+            }
+            let replace_args = split_string(&split_input[1..].join(""));
+            if replace_args.len() != 2 {
+                return Err("Invalid Command");
+            }
+            Ok(replace_args)
+        }
         if input.is_empty() {
             return Err("Empty Command");
         }
@@ -154,6 +194,22 @@ impl TryFrom<&str> for Command {
                 }
 
                 Ok(Command::ShellExecute(split_input[1].to_string()))
+            }
+            "rg" | "replaceglobal" => {
+                let mut replace_args = create_replace_string(&split_input)?;
+
+                Ok(Command::Replace(Replace::Global(
+                    replace_args.remove(0),
+                    replace_args.remove(0),
+                )))
+            }
+            "rs" | "replacesingle" => {
+                let mut replace_args = create_replace_string(&split_input)?;
+
+                Ok(Command::Replace(Replace::Single(
+                    replace_args.remove(0),
+                    replace_args.remove(0),
+                )))
             }
             _ => Err("Invalid Command"),
         }
@@ -983,6 +1039,85 @@ pub(crate) fn update(
                         model.command_history_index = model.command_history.len();
                         Ok(())
                     }
+                    Command::Replace(replace) => match replace {
+                        Replace::Single(from, to) => match &model.current_command {
+                            CurrentView::CommandWithoutOutput(c) => {
+                                let (first, last) = c.input.split_at(c.cursor_position as usize);
+
+                                let (new_cursor_position, new_command) = if last.contains(&from) {
+                                    (
+                                        c.cursor_position,
+                                        format!("{}{}", first, last.replacen(&from, &to, 1)),
+                                    )
+                                } else if first.contains(&from) {
+                                    let difference = to.len() as i64 - from.len() as i64;
+                                    let new_command =
+                                        format!("{}{}", first.replacen(&from, &to, 1), last);
+                                    (
+                                        // SAFETY: this conversion to u64 is fine because
+                                        // given that we split by cursor position
+                                        //  we know that the difference can only be
+                                        // as large as the cursor position itself
+                                        (c.cursor_position as i64 + difference) as u64,
+                                        new_command,
+                                    )
+                                } else if c.input.contains(&from) {
+                                    // this else if happens if the cursor is inside the
+                                    // word that is being searched for
+                                    let new_command = c.input.replacen(&from, &to, 1);
+                                    (new_command.len() as u64, new_command)
+                                } else {
+                                    (c.cursor_position, format!("{}{}", first, last))
+                                };
+
+                                model.current_command =
+                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        cursor_position: new_cursor_position,
+                                        input: new_command,
+                                    });
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                            CurrentView::Output(_) => {
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                            CurrentView::CommandWithOutput(c) => {
+                                let new_command = c.input.replacen(&from, &to, 1);
+                                model.set_current_view_from_command(
+                                    new_command.len() as u64,
+                                    new_command,
+                                );
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                        },
+                        Replace::Global(from, to) => match &model.current_command {
+                            CurrentView::CommandWithoutOutput(c) => {
+                                let new_command = c.input.replace(&from, &to);
+                                model.current_command =
+                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        cursor_position: new_command.len() as u64,
+                                        input: new_command,
+                                    });
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                            CurrentView::Output(_) => {
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                            CurrentView::CommandWithOutput(c) => {
+                                let new_command = c.input.clone().replace(&from, &to);
+                                model.set_current_view_from_command(
+                                    new_command.len() as u64,
+                                    new_command,
+                                );
+                                model.mode = Mode::Idle;
+                                Ok(())
+                            }
+                        },
+                    },
                 }
             }
             _ => {

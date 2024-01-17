@@ -21,6 +21,7 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [x] command history (see screenshot)
 - [x] hints to edit and jump around
 - [x] execute commands using other shells (`bash`,`zsh`,`fish` etc.)
+- [x] search and replace
 - [ ] expanding globs(*)
 - [ ] unicode support
 - [ ] piping commands
@@ -28,7 +29,6 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [ ] aliases
 - [ ] searching history
 - [ ] pagination
-- [ ] search and replace
 - [ ] variable expansion
 - [ ] ssh
 

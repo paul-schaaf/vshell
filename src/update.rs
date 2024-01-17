@@ -88,7 +88,7 @@ impl TryFrom<&str> for Command {
             return Err("Invalid Command");
         }
         match split_input[0] {
-            "q" | "quit" => Ok(Command::Quit),
+            "q" | "quit" | "exit" => Ok(Command::Quit),
             "c" | "change" => {
                 if split_input.len() != 2 {
                     return Err("Invalid Command");

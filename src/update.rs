@@ -27,7 +27,7 @@ enum Command {
     CopyOutput,
     Paste,
     ToggleHints,
-    ShellExecute(String),
+    ShellExecute(String, Option<String>),
     Replace(Replace),
     SwitchHistory,
 }
@@ -194,7 +194,15 @@ impl TryFrom<&str> for Command {
                     return Err("Invalid Command");
                 }
 
-                Ok(Command::ShellExecute(split_input[1].to_string()))
+                match split_input[1].contains(',') {
+                    true => {
+                        let mut args = split_input[1].split(',');
+                        let shell = args.next().unwrap();
+                        let prefix = args.collect::<Vec<&str>>().join(",");
+                        Ok(Command::ShellExecute(shell.to_string(), Some(prefix)))
+                    }
+                    false => Ok(Command::ShellExecute(split_input[1].to_string(), None)),
+                }
             }
             "rg" | "replaceglobal" => {
                 let mut replace_args = create_replace_string(&split_input)?;
@@ -1018,11 +1026,23 @@ pub(crate) fn update(
                             }
                         }
                     }
-                    Command::ShellExecute(shell) => {
-                        fn executed_shell_command(shell: &str, command: &str) -> CompletedCommand {
+                    Command::ShellExecute(shell, prefix) => {
+                        fn executed_shell_command(
+                            shell: &str,
+                            command: &str,
+                            prefix: Option<String>,
+                        ) -> CompletedCommand {
+                            let command = match prefix {
+                                None => command.to_string(),
+                                Some(mut prefix) => {
+                                    prefix.push_str(command);
+                                    prefix
+                                }
+                            };
+
                             let executed_command = std::process::Command::new(shell)
                                 .arg("-c")
-                                .arg(command)
+                                .arg(&command)
                                 .output();
 
                             CompletedCommand::new(
@@ -1051,14 +1071,14 @@ pub(crate) fn update(
                                 }
 
                                 let completed_command =
-                                    executed_shell_command(&shell, command.input.as_str());
+                                    executed_shell_command(&shell, command.input.as_str(), prefix);
                                 model.command_history.push(completed_command.clone());
                                 model.current_command =
                                     CurrentView::Output(completed_command.output.clone());
                             }
                             CurrentView::CommandWithOutput(command) => {
                                 let completed_command =
-                                    executed_shell_command(&shell, command.input.as_str());
+                                    executed_shell_command(&shell, command.input.as_str(), prefix);
                                 model.command_history.push(completed_command.clone());
                                 model.current_command =
                                     CurrentView::Output(completed_command.output.clone());

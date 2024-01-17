@@ -442,14 +442,8 @@ pub(crate) fn update(
                     }
                 };
                 model.command_history_index = model.command_history.len();
-                let current_directory = std::env::current_dir();
-                if current_directory.is_err() {
+                if model.add_current_directory_to_history().is_err() {
                     return Ok(());
-                }
-                let current_directory = current_directory.unwrap();
-                // SAFETY: we add the initial directory on startup so there must be a last directory
-                if current_directory != *model.directory_history.last().unwrap() {
-                    model.directory_history.push(current_directory);
                 }
                 Ok(())
             }
@@ -771,10 +765,14 @@ pub(crate) fn update(
                             crate::HistoryType::DirectoryHistory => {
                                 let number = number.unwrap();
                                 if number < model.directory_history.len() {
-                                    let directory = &model.directory_history[number];
+                                    let index = model.directory_history.len() - number - 1;
+                                    let directory = &model.directory_history[index];
                                     let new_command =
                                         format!("cd \"{}\"", directory.to_string_lossy());
                                     let completed_command = execute_command(new_command.as_str());
+                                    if model.add_current_directory_to_history().is_err() {
+                                        return Ok(());
+                                    }
                                     model.command_history.push(completed_command.clone());
                                     model.command_history_index = model.command_history.len();
                                     model.current_command =
@@ -1087,17 +1085,8 @@ pub(crate) fn update(
                                 // do nothing
                             }
                         };
-                        let current_directory = std::env::current_dir();
-                        if current_directory.is_err() {
-                            model.command_history_index = model.command_history.len();
-                            return Ok(());
-                        }
-                        let current_directory = current_directory.unwrap();
-                        // SAFETY: we add the initial directory on startup so there must be a last directory
-                        if current_directory != *model.directory_history.last().unwrap() {
-                            model.directory_history.push(current_directory);
-                        }
                         model.command_history_index = model.command_history.len();
+                        let _ = model.add_current_directory_to_history();
                         Ok(())
                     }
                     Command::Replace(replace) => match replace {

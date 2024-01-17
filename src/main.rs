@@ -287,4 +287,17 @@ impl Model {
         });
         self.command_history_index = self.command_history.len();
     }
+
+    fn add_current_directory_to_history(&mut self) -> Result<(), std::io::Error> {
+        let current_directory = std::env::current_dir();
+        if current_directory.is_err() {
+            return Ok(());
+        }
+        let current_directory = current_directory.unwrap();
+        // SAFETY: we add the initial directory on startup so there must be a last directory
+        if current_directory != *self.directory_history.last().unwrap() {
+            self.directory_history.push(current_directory);
+        }
+        Ok(())
+    }
 }

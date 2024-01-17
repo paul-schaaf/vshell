@@ -17,9 +17,10 @@
 Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon commands that use the shell's features.
 
 - [x] basic shell functionality
-- [x] pinned commands (press `ctrl-p` to pin/unpin the currently selected command. pinned commands stay at the top of the history (see screenshot))
-- [x] command history (use and up down arrows or `ctrl-s` + `number` to select command from the history)
-- [x] hints to edit and jump around (use `ctrl-b` and `ctrl-a` to jump before and after hints respectively. use `ctrl-e` to edit a hint. use `ctrl-h` to toggle hints.)
+- [x] pinned commands (pinned commands stay at the top of the history (see screenshot))
+- [x] command history (see screenshot)
+- [x] hints to edit and jump around
+- [x] execute commands using other shells (`bash`,`zsh`,`fish` etc.)
 - [ ] expanding globs(*)
 - [ ] unicode support
 - [ ] piping commands

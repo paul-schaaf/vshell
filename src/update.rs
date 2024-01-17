@@ -711,13 +711,13 @@ pub(crate) fn update(
                         }
                     }
                     Command::Select(number) => {
-                        if model.command_history.is_empty() {
-                            return Ok(());
-                        }
-
                         if number.is_none() {
                             model.set_current_view_from_command(0, String::new());
                             model.mode = Mode::Idle;
+                            return Ok(());
+                        }
+
+                        if model.command_history.is_empty() {
                             return Ok(());
                         }
 

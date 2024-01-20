@@ -298,6 +298,50 @@ pub(crate) fn update(
         Some(children)
     }
 
+    fn paste(text_to_insert: &str, model: &mut Model) -> Result<(), Box<dyn std::error::Error>> {
+        match &model.current_command {
+            CurrentView::CommandWithoutOutput(command) => {
+                if command.cursor_position == command.input.len() as u64 {
+                    let new_command = format!("{}{}", command.input, text_to_insert);
+                    model.current_command =
+                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                            input: new_command,
+                            cursor_position: command.cursor_position + text_to_insert.len() as u64,
+                        });
+                    model.command_history_index = model.command_history.len();
+                    Ok(())
+                } else {
+                    let (first, second) = command.input.split_at(command.cursor_position as usize);
+                    let new_command = format!("{}{}{}", first, text_to_insert, second);
+                    model.current_command =
+                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                            input: new_command,
+                            cursor_position: command.cursor_position + text_to_insert.len() as u64,
+                        });
+                    model.command_history_index = model.command_history.len();
+                    Ok(())
+                }
+            }
+            CurrentView::CommandWithOutput(command) => {
+                let new_command = format!("{}{}", command.input, text_to_insert);
+                model.current_command = CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                    cursor_position: new_command.len() as u64,
+                    input: new_command,
+                });
+                model.command_history_index = model.command_history.len();
+                Ok(())
+            }
+            CurrentView::Output(_) => {
+                model.current_command = CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                    cursor_position: text_to_insert.len() as u64,
+                    input: text_to_insert.to_string(),
+                });
+                model.command_history_index = model.command_history.len();
+                Ok(())
+            }
+        }
+    }
+
     if event == event::Event::CtrlC {
         model.mode = Mode::Quit;
         return Ok(());
@@ -576,6 +620,7 @@ pub(crate) fn update(
                     }
                 }
             }
+            event::Event::Paste(text_to_insert) => paste(text_to_insert.as_str(), model),
             _ => {
                 // do nothing
                 Ok(())
@@ -1008,57 +1053,7 @@ pub(crate) fn update(
                     }
                     Command::Paste => {
                         model.mode = Mode::Idle;
-                        match &model.current_command {
-                            CurrentView::CommandWithoutOutput(command) => {
-                                let text_to_insert = clipboard.get_text()?;
-                                if command.cursor_position == command.input.len() as u64 {
-                                    let new_command =
-                                        format!("{}{}", command.input, text_to_insert);
-                                    model.current_command =
-                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                            input: new_command,
-                                            cursor_position: command.cursor_position
-                                                + text_to_insert.len() as u64,
-                                        });
-                                    model.command_history_index = model.command_history.len();
-                                    Ok(())
-                                } else {
-                                    let (first, second) =
-                                        command.input.split_at(command.cursor_position as usize);
-                                    let new_command =
-                                        format!("{}{}{}", first, text_to_insert, second);
-                                    model.current_command =
-                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                            input: new_command,
-                                            cursor_position: command.cursor_position
-                                                + text_to_insert.len() as u64,
-                                        });
-                                    model.command_history_index = model.command_history.len();
-                                    Ok(())
-                                }
-                            }
-                            CurrentView::CommandWithOutput(command) => {
-                                let text_to_insert = clipboard.get_text()?;
-                                let new_command = format!("{}{}", command.input, text_to_insert);
-                                model.current_command =
-                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                        cursor_position: new_command.len() as u64,
-                                        input: new_command,
-                                    });
-                                model.command_history_index = model.command_history.len();
-                                Ok(())
-                            }
-                            CurrentView::Output(_) => {
-                                let new_command = clipboard.get_text()?;
-                                model.current_command =
-                                    CurrentView::CommandWithoutOutput(CommandWithoutOutput {
-                                        cursor_position: new_command.len() as u64,
-                                        input: new_command,
-                                    });
-                                model.command_history_index = model.command_history.len();
-                                Ok(())
-                            }
-                        }
+                        paste(clipboard.get_text()?.as_str(), model)
                     }
                     Command::ShellExecute(shell, prefix) => {
                         fn executed_shell_command(

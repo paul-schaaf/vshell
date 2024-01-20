@@ -8,12 +8,14 @@ use std::{io::stdout, panic};
 pub(crate) fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
+    std::io::stdout().execute(crossterm::event::EnableBracketedPaste)?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     Ok(terminal)
 }
 
 pub(crate) fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
     std::io::stdout().execute(crossterm::event::DisableMouseCapture)?;
+    std::io::stdout().execute(crossterm::event::DisableBracketedPaste)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())
@@ -24,6 +26,9 @@ pub(crate) fn install_panic_hook() {
     panic::set_hook(Box::new(move |panic_info| {
         std::io::stdout()
             .execute(crossterm::event::DisableMouseCapture)
+            .unwrap();
+        std::io::stdout()
+            .execute(crossterm::event::DisableBracketedPaste)
             .unwrap();
         stdout().execute(LeaveAlternateScreen).unwrap();
 

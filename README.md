@@ -23,6 +23,7 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [x] hints to edit and jump around
 - [x] execute commands using other shells (`bash`,`zsh`,`fish` etc.)
 - [x] search and replace
+- [x] select directories by clicking
 - [ ] expanding globs(*)
 - [ ] unicode support
 - [ ] piping commands

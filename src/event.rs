@@ -9,6 +9,7 @@ pub(crate) enum Event {
     Left,
     Right,
     Character(char),
+    MouseDown(u16, u16),
 }
 
 pub(crate) fn wait_for_event() -> Event {
@@ -55,6 +56,12 @@ fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
                 None
             }
         }
+        crossterm::event::Event::Mouse(mouse) => match mouse.kind {
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                Some(Event::MouseDown(mouse.column, mouse.row))
+            }
+            _ => None,
+        },
         _ => None,
     }
 }

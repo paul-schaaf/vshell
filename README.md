@@ -20,7 +20,7 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [x] pinned commands (pinned commands stay at the top of the history (see screenshot))
 - [x] command history (see screenshot)
 - [x] working directory history 
-- [x] hints to edit and jump around
+- [x] hints to edit and navigate input and copy parts of output
 - [x] execute commands using other shells (`bash`,`zsh`,`fish` etc.)
 - [x] search and replace
 - [x] select directories by clicking

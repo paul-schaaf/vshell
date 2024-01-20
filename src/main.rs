@@ -1,6 +1,7 @@
-use std::{fmt, path::PathBuf};
+use std::{ffi::OsString, fmt, path::PathBuf};
 
 use arboard::Clipboard;
+use ratatui::layout::Rect;
 
 mod event;
 mod tui;
@@ -9,14 +10,19 @@ mod view;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tui::install_panic_hook();
+    let run_result = run();
+    tui::restore_terminal()?;
+    run_result
+}
 
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = Clipboard::new()?;
     let mut terminal = tui::init_terminal()?;
     let mut model = Model::default();
     model.directory_history.push(std::env::current_dir()?);
 
     while !model.should_quit() {
-        terminal.draw(|frame| view::view(&model, frame))?;
+        terminal.draw(|frame| view::view(&mut model, frame))?;
 
         let event = event::wait_for_event();
         update::update(&mut model, event, &mut clipboard)?;
@@ -28,7 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    tui::restore_terminal()?;
     Ok(())
 }
 
@@ -109,7 +114,32 @@ enum Mode {
     #[default]
     Idle,
     Command(String),
+    Directory(Directory),
     Quit,
+}
+
+#[derive(Debug, PartialEq, Default)]
+pub struct Directory {
+    search: String,
+    path: Option<OsString>,
+    current_dir: PathBuf,
+    children: Vec<File>,
+    location: Option<Rect>,
+}
+
+#[derive(Debug, PartialEq, Ord, Eq, PartialOrd)]
+enum File {
+    Directory(OsString),
+    File(OsString),
+}
+
+impl fmt::Display for File {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            File::Directory(s) => write!(f, "{}", s.to_string_lossy()),
+            File::File(s) => write!(f, "{}", s.to_string_lossy()),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Default)]

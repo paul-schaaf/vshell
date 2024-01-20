@@ -1,12 +1,13 @@
 use ratatui::{
-    layout::Rect,
-    style::Stylize,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    layout::{Constraint, Layout, Rect},
+    style::{Style, Stylize},
+    text::Line,
+    widgets::{Block, Borders, Clear, ListItem, Paragraph, Wrap},
 };
 
-use crate::{split_string, CurrentView, Mode, Model, OutputType, StringType};
+use crate::{split_string, CurrentView, File, Mode, Model, OutputType, StringType};
 
-pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
+pub(crate) fn view(model: &mut Model, frame: &mut ratatui::Frame) {
     let outer_layout = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints(vec![
@@ -73,6 +74,8 @@ pub(crate) fn view(model: &Model, frame: &mut ratatui::Frame) {
             },
         );
     }
+
+    render_directory_view(model, frame);
 }
 
 fn base10_to_base26(mut num: u32) -> String {
@@ -90,7 +93,7 @@ fn base10_to_base26(mut num: u32) -> String {
 
 const TAB_STRING: &str = "|-->";
 
-fn render_input(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
     let writable_width = layout.width - 2;
     let mut x = 1;
     let mut y = 1;
@@ -622,6 +625,98 @@ fn render_directory_history(frame: &mut ratatui::Frame, model: &Model, layout: R
             .wrap(Wrap { trim: false }),
         layout,
     );
+}
+
+fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
+    if let Mode::Directory(directory) = &mut model.mode {
+        fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+            let popup_layout = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage((100 - percent_y) / 2),
+                    Constraint::Percentage(percent_y),
+                    Constraint::Percentage((100 - percent_y) / 2),
+                ])
+                .split(r);
+
+            Layout::default()
+                .direction(ratatui::layout::Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage((100 - percent_x) / 2),
+                    Constraint::Percentage(percent_x),
+                    Constraint::Percentage((100 - percent_x) / 2),
+                ])
+                .split(popup_layout[1])[1]
+        }
+
+        let mut items = directory
+            .children
+            .iter()
+            .map(|child| {
+                let item = ListItem::new(Line::from(child.to_string()));
+                match child {
+                    File::Directory(_) => {
+                        item.style(Style::default().fg(ratatui::style::Color::Green))
+                    }
+                    File::File(_) => item.style(Style::default().fg(ratatui::style::Color::White)),
+                }
+            })
+            .collect::<Vec<ListItem>>();
+        items.insert(
+            0,
+            ListItem::new(Line::from(".."))
+                .style(Style::default().fg(ratatui::style::Color::Green)),
+        );
+        items.insert(
+            0,
+            ListItem::new(Line::from(".")).style(Style::default().fg(ratatui::style::Color::Green)),
+        );
+
+        let area = centered_rect(40, 50, frame.size());
+
+        frame.render_widget(Clear, area);
+
+        frame.render_widget(
+            Block::new()
+                .white()
+                .on_black()
+                .bold()
+                .borders(ratatui::widgets::Borders::ALL)
+                .title_alignment(ratatui::layout::Alignment::Center)
+                .title(directory.current_dir.to_string_lossy().to_string()),
+            area,
+        );
+
+        let layouts = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Min(0)])
+            .split(area);
+
+        frame.render_widget(
+            Paragraph::new(
+                Line::from(directory.search.as_str()).alignment(ratatui::layout::Alignment::Center),
+            )
+            .block(Block::default().borders(Borders::BOTTOM)),
+            Rect {
+                x: layouts[0].x + 1,
+                y: layouts[0].y + 2,
+                width: layouts[0].width - 2,
+                height: layouts[0].height,
+            },
+        );
+
+        let list_location = Rect {
+            x: layouts[1].x + 1,
+            y: layouts[1].y + 2,
+            width: layouts[1].width - 2,
+            height: layouts[1].height - 4,
+        };
+        frame.render_widget(
+            ratatui::widgets::List::new(items).block(Block::new().white().on_black().bold()),
+            list_location,
+        );
+        directory.location = Some(list_location);
+    }
 }
 
 #[cfg(test)]

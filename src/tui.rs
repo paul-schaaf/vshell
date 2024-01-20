@@ -13,6 +13,7 @@ pub(crate) fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn std::err
 }
 
 pub(crate) fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    std::io::stdout().execute(crossterm::event::DisableMouseCapture)?;
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())
@@ -21,7 +22,11 @@ pub(crate) fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
 pub(crate) fn install_panic_hook() {
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
+        std::io::stdout()
+            .execute(crossterm::event::DisableMouseCapture)
+            .unwrap();
         stdout().execute(LeaveAlternateScreen).unwrap();
+
         disable_raw_mode().unwrap();
         original_hook(panic_info);
     }));

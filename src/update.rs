@@ -1,8 +1,12 @@
+use std::path::Path;
+
 use arboard::Clipboard;
+use crossterm::ExecutableCommand;
+use ratatui::layout::Rect;
 
 use crate::{
-    event, split_string, CommandWithoutOutput, CompletedCommand, CurrentView, HintState, Mode,
-    Model, Origin, Output, OutputType, StringType,
+    event, split_string, CommandWithoutOutput, CompletedCommand, CurrentView, Directory, File,
+    HintState, Mode, Model, Origin, Output, OutputType, StringType,
 };
 
 fn base26_to_base10(input: &str) -> Result<u32, &'static str> {
@@ -30,6 +34,7 @@ enum Command {
     ShellExecute(String, Option<String>),
     Replace(Replace),
     SwitchHistory,
+    ChoosePath,
 }
 
 enum Replace {
@@ -221,6 +226,7 @@ impl TryFrom<&str> for Command {
                 )))
             }
             "sh" | "switchhistory" => Ok(Command::SwitchHistory),
+            "choosepath" => Ok(Command::ChoosePath),
             _ => Err("Invalid Command"),
         }
     }
@@ -266,6 +272,30 @@ pub(crate) fn update(
         } else {
             None
         }
+    }
+
+    fn get_directory_children(directory: &Path) -> Option<Vec<File>> {
+        let children = directory.read_dir();
+        if children.is_err() {
+            return None;
+        }
+        let children = children
+            .unwrap()
+            .map(|entry| {
+                entry.and_then(|e| {
+                    e.file_type().map(|ft| match ft.is_dir() {
+                        true => File::Directory(e.file_name()),
+                        false => File::File(e.file_name()),
+                    })
+                })
+            })
+            .collect::<std::io::Result<Vec<File>>>();
+        if children.is_err() {
+            return None;
+        }
+        let mut children = children.unwrap();
+        children.sort();
+        Some(children)
     }
 
     if event == event::Event::CtrlC {
@@ -545,6 +575,10 @@ pub(crate) fn update(
                         Ok(())
                     }
                 }
+            }
+            _ => {
+                // do nothing
+                Ok(())
             }
         },
 
@@ -986,6 +1020,7 @@ pub(crate) fn update(
                                             cursor_position: command.cursor_position
                                                 + text_to_insert.len() as u64,
                                         });
+                                    model.command_history_index = model.command_history.len();
                                     Ok(())
                                 } else {
                                     let (first, second) =
@@ -998,6 +1033,7 @@ pub(crate) fn update(
                                             cursor_position: command.cursor_position
                                                 + text_to_insert.len() as u64,
                                         });
+                                    model.command_history_index = model.command_history.len();
                                     Ok(())
                                 }
                             }
@@ -1006,10 +1042,10 @@ pub(crate) fn update(
                                 let new_command = format!("{}{}", command.input, text_to_insert);
                                 model.current_command =
                                     CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                        cursor_position: new_command.len() as u64,
                                         input: new_command,
-                                        cursor_position: command.input.len() as u64
-                                            + text_to_insert.len() as u64,
                                     });
+                                model.command_history_index = model.command_history.len();
                                 Ok(())
                             }
                             CurrentView::Output(_) => {
@@ -1180,6 +1216,36 @@ pub(crate) fn update(
                         model.mode = Mode::Idle;
                         Ok(())
                     }
+                    Command::ChoosePath => {
+                        match model.current_command {
+                            CurrentView::CommandWithoutOutput(_) => {}
+                            _ => {
+                                // do nothing
+                                return Ok(());
+                            }
+                        }
+
+                        let current_dir = std::env::current_dir();
+                        if current_dir.is_err() {
+                            return Ok(());
+                        }
+                        let current_dir = current_dir.unwrap();
+                        let children = get_directory_children(&current_dir);
+                        if children.is_none() {
+                            return Ok(());
+                        }
+                        let children = children.unwrap();
+
+                        model.mode = Mode::Directory(Directory {
+                            search: String::new(),
+                            path: None,
+                            current_dir,
+                            children,
+                            location: None,
+                        });
+                        std::io::stdout().execute(crossterm::event::EnableMouseCapture)?;
+                        Ok(())
+                    }
                 }
             }
             _ => {
@@ -1187,6 +1253,173 @@ pub(crate) fn update(
                 Ok(())
             }
         },
+        Mode::Directory(directory) => {
+            fn position_in_list(list_location: Rect, position: (u16, u16)) -> Option<u16> {
+                let (x, y) = position;
+                let (x1, y1) = (list_location.x, list_location.y);
+                let (x2, y2) = (x1 + list_location.width, y1 + list_location.height);
+                if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
+                    Some(y - y1)
+                } else {
+                    None
+                }
+            }
+
+            fn set_children(directory: &mut Directory) -> std::io::Result<()> {
+                let children = get_directory_children(&directory.current_dir);
+                if children.is_none() {
+                    return Ok(());
+                }
+                let children = children.unwrap();
+                if directory.search.is_empty() {
+                    directory.children = children;
+                } else {
+                    directory.children = children
+                        .into_iter()
+                        .filter(|f| {
+                            f.to_string()
+                                .to_lowercase()
+                                .starts_with(&directory.search.to_lowercase())
+                        })
+                        .collect();
+                }
+                Ok(())
+            }
+
+            match event {
+                event::Event::MouseDown(x, y) => {
+                    // SAFETY: if we reach this code the directory location has already been set by the view
+                    let directory_location = directory.location.unwrap();
+                    let position = position_in_list(directory_location, (x, y));
+                    if position.is_none() {
+                        return Ok(());
+                    }
+                    let position = position.unwrap();
+                    directory.search = String::new();
+                    if position == 1 {
+                        let parent = directory.current_dir.parent();
+                        if parent.is_none() {
+                            return Ok(());
+                        }
+                        let parent = parent.unwrap();
+                        directory.current_dir = parent.into();
+                    } else if position == 0 {
+                        let path = directory.current_dir.to_string_lossy().to_string();
+                        model.mode = Mode::Idle;
+                        std::io::stdout().execute(crossterm::event::DisableMouseCapture)?;
+
+                        match &model.current_command {
+                            CurrentView::CommandWithoutOutput(command) => {
+                                let text_to_insert = path;
+                                if command.cursor_position == command.input.len() as u64 {
+                                    let new_command =
+                                        format!("{}{}", command.input, text_to_insert);
+                                    model.current_command =
+                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                            input: new_command,
+                                            cursor_position: command.cursor_position
+                                                + text_to_insert.len() as u64,
+                                        });
+
+                                    return Ok(());
+                                } else {
+                                    let (first, second) =
+                                        command.input.split_at(command.cursor_position as usize);
+                                    let new_command =
+                                        format!("{}{}{}", first, text_to_insert, second);
+                                    model.current_command =
+                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                            input: new_command,
+                                            cursor_position: command.cursor_position
+                                                + text_to_insert.len() as u64,
+                                        });
+                                    return Ok(());
+                                }
+                            }
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        if position as i64 - 2 < 0
+                            || directory.children.len() <= position as usize - 2
+                        {
+                            return Ok(());
+                        }
+                        match &directory.children[position as usize - 2] {
+                            File::Directory(directory_name) => {
+                                directory.current_dir.push(directory_name);
+                            }
+                            File::File(file) => {
+                                directory.current_dir.push(file);
+                                let path = directory.current_dir.to_string_lossy().to_string();
+                                model.mode = Mode::Idle;
+                                std::io::stdout().execute(crossterm::event::DisableMouseCapture)?;
+
+                                match &model.current_command {
+                                    CurrentView::CommandWithoutOutput(command) => {
+                                        let text_to_insert = path;
+                                        if command.cursor_position == command.input.len() as u64 {
+                                            let new_command =
+                                                format!("{}{}", command.input, text_to_insert);
+                                            model.current_command =
+                                                CurrentView::CommandWithoutOutput(
+                                                    CommandWithoutOutput {
+                                                        input: new_command,
+                                                        cursor_position: command.cursor_position
+                                                            + text_to_insert.len() as u64,
+                                                    },
+                                                );
+
+                                            return Ok(());
+                                        } else {
+                                            let (first, second) = command
+                                                .input
+                                                .split_at(command.cursor_position as usize);
+                                            let new_command =
+                                                format!("{}{}{}", first, text_to_insert, second);
+                                            model.current_command =
+                                                CurrentView::CommandWithoutOutput(
+                                                    CommandWithoutOutput {
+                                                        input: new_command,
+                                                        cursor_position: command.cursor_position
+                                                            + text_to_insert.len() as u64,
+                                                    },
+                                                );
+                                            return Ok(());
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                        }
+                    }
+                    let children = get_directory_children(&directory.current_dir);
+                    if children.is_none() {
+                        return Ok(());
+                    }
+                    directory.children = children.unwrap();
+                    Ok(())
+                }
+                event::Event::Esc => {
+                    model.mode = Mode::Idle;
+                    std::io::stdout().execute(crossterm::event::DisableMouseCapture)?;
+                    Ok(())
+                }
+                event::Event::Character(c) => {
+                    directory.search.push(c);
+                    let _ = set_children(directory);
+                    Ok(())
+                }
+                event::Event::Backspace => {
+                    directory.search.pop();
+                    let _ = set_children(directory);
+                    Ok(())
+                }
+                _ => {
+                    // do nothing
+                    Ok(())
+                }
+            }
+        }
     }
 }
 

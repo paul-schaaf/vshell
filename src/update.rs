@@ -226,7 +226,7 @@ impl TryFrom<&str> for Command {
                 )))
             }
             "sh" | "switchhistory" => Ok(Command::SwitchHistory),
-            "choosepath" => Ok(Command::ChoosePath),
+            "cp" | "choosepath" => Ok(Command::ChoosePath),
             _ => Err("Invalid Command"),
         }
     }

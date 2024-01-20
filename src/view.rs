@@ -483,15 +483,140 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
     };
 
     if let Some(output) = output {
-        frame.render_widget(
-            Paragraph::new(output)
-                .block(block.clone().borders(Borders::ALL))
-                .wrap(Wrap { trim: false }),
-            layout,
-        );
+        match model.config.hint_state {
+            crate::HintState::ShowHints => {
+                let writable_width = layout.width - 2;
+                let mut x = layout.x + 1;
+                let mut y = 1;
+                let mut index = 0;
+
+                let string_that_was_split = split_string(output);
+
+                for word in string_that_was_split.iter() {
+                    match word {
+                        StringType::Word(content) => {
+                            let hint = match model.config.hint_state {
+                                crate::HintState::ShowHints => {
+                                    format!("{}:", base10_to_base26(index as u32))
+                                }
+                                crate::HintState::HideHints => String::new(),
+                            };
+
+                            let mut string_to_render = format!("{}{}", hint, content);
+                            if x + 1 + string_to_render.len() as u16 > layout.width + layout.x {
+                                let mut space_left = layout.x + layout.width - x - 1;
+                                // frame.render_widget(
+                                //     Paragraph::new(space_left.to_string())
+                                //         .block(Block::new().white().on_red())
+                                //         .wrap(Wrap { trim: false }),
+                                //     layout,
+                                // );
+                                let mut should_quit = false;
+                                while !should_quit {
+                                    if space_left == 0 {
+                                        x = layout.x + 1;
+                                        y += 1;
+                                        space_left = writable_width;
+                                    }
+                                    let current_string = if string_to_render.len() as u16
+                                        <= space_left
+                                    {
+                                        should_quit = true;
+                                        string_to_render.clone()
+                                    } else {
+                                        let mut c = string_to_render.split_off(space_left as usize);
+                                        std::mem::swap(&mut c, &mut string_to_render);
+                                        c
+                                    };
+
+                                    space_left = layout.x + layout.width
+                                        - x
+                                        - 1
+                                        - current_string.len() as u16;
+
+                                    let location = Rect {
+                                        x,
+                                        y,
+                                        width: current_string.len() as u16,
+                                        height: 1,
+                                    };
+
+                                    frame.render_widget(
+                                        Paragraph::new(current_string.as_str())
+                                            .block(Block::new().white().on_black())
+                                            .wrap(Wrap { trim: false }),
+                                        location,
+                                    );
+                                    x += current_string.len() as u16;
+                                }
+                            } else {
+                                let location = Rect {
+                                    x,
+                                    y,
+                                    width: string_to_render.len() as u16,
+                                    height: 1,
+                                };
+                                frame.render_widget(
+                                    Paragraph::new(string_to_render.as_str())
+                                        .block(Block::new().white().on_black())
+                                        .wrap(Wrap { trim: false }),
+                                    location,
+                                );
+                                x += string_to_render.len() as u16;
+                            }
+
+                            index += 1;
+                        }
+                        StringType::Whitespace(content) => {
+                            for _ in content.chars() {
+                                if x > writable_width + layout.x {
+                                    x = layout.x + 2;
+                                    y += 1;
+                                } else {
+                                    x += 1;
+                                }
+                            }
+                        }
+                        StringType::Tab => {
+                            if x + 1 + TAB_STRING.len() as u16 > layout.width + layout.x {
+                                x = layout.x + 1;
+                                y += 1;
+                            }
+                            let location = Rect {
+                                x,
+                                y,
+                                width: TAB_STRING.len() as u16,
+                                height: 1,
+                            };
+                            frame.render_widget(
+                                Paragraph::new(TAB_STRING)
+                                    .block(Block::new().white().on_black())
+                                    .wrap(Wrap { trim: false }),
+                                location,
+                            );
+                            x += TAB_STRING.len() as u16;
+                        }
+                        StringType::Newline(_) => {
+                            y += 1;
+                            x = layout.x + 1;
+                        }
+                    }
+                }
+            }
+            crate::HintState::HideHints => {
+                frame.render_widget(
+                    Paragraph::new(output)
+                        .block(block.clone().borders(Borders::ALL))
+                        .wrap(Wrap { trim: false }),
+                    layout,
+                );
+            }
+        }
     } else {
         frame.render_widget(block.clone().borders(Borders::ALL), layout);
     }
+
+    frame.render_widget(block.clone().borders(Borders::ALL), layout);
 
     match origin {
         Some(shell) => {

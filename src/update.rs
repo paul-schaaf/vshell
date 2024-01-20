@@ -28,7 +28,7 @@ enum Command {
     JumpBefore(String),
     JumpAfter(String),
     Pin,
-    CopyOutput,
+    CopyOutput(CopyOutput),
     Paste,
     ToggleHints,
     ShellExecute(String, Option<String>),
@@ -43,6 +43,12 @@ enum Replace {
 }
 
 enum Edit {
+    Single(String),
+    Range(String, String),
+}
+
+enum CopyOutput {
+    All,
     Single(String),
     Range(String, String),
 }
@@ -192,7 +198,61 @@ impl TryFrom<&str> for Command {
             }
             "pin" => Ok(Command::Pin),
             "p" | "paste" => Ok(Command::Paste),
-            "co" | "copyoutput" => Ok(Command::CopyOutput),
+            "co" | "copyoutput" => {
+                if split_input.len() == 1 {
+                    return Ok(Command::CopyOutput(CopyOutput::All));
+                }
+                if split_input.len() != 2 {
+                    return Err("Invalid Command");
+                }
+                match split_input[1].contains(',') {
+                    true => {
+                        let mut hints = split_input[1].split(',');
+                        let beginning_hint = hints.next().unwrap();
+                        let end_hint = hints.next().unwrap();
+                        if hints.next().is_some() {
+                            return Err("Invalid Command");
+                        }
+                        let mut beginning = String::new();
+                        for c in beginning_hint.chars() {
+                            if c.is_alphabetic() {
+                                beginning.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if beginning.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        let mut end = String::new();
+                        for c in end_hint.chars() {
+                            if c.is_alphabetic() {
+                                end.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if end.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        Ok(Command::CopyOutput(CopyOutput::Range(beginning, end)))
+                    }
+                    false => {
+                        let mut hint = String::new();
+                        for c in split_input[1].chars() {
+                            if c.is_alphabetic() {
+                                hint.push(c);
+                            } else {
+                                return Err("Invalid Character");
+                            }
+                        }
+                        if hint.is_empty() {
+                            return Err("Missing hints");
+                        }
+                        Ok(Command::CopyOutput(CopyOutput::Single(hint)))
+                    }
+                }
+            }
             "th" | "togglehints" => Ok(Command::ToggleHints),
             "se" | "shellexecute" => {
                 if split_input.len() != 2 {
@@ -1026,22 +1086,74 @@ pub(crate) fn update(
                             }
                         }
                     }
-                    Command::CopyOutput => {
+                    Command::CopyOutput(copy_output) => {
                         model.mode = Mode::Idle;
-                        match model.current_command {
+                        let output_string = match model.current_command {
                             CurrentView::CommandWithoutOutput(_) => {
                                 // do nothing
-                                Ok(())
+                                return Ok(());
                             }
-                            CurrentView::CommandWithOutput(ref command) => {
-                                clipboard.set_text(command.output.as_str())?;
-                                Ok(())
+                            CurrentView::CommandWithOutput(ref command) => command.output.as_str(),
+                            CurrentView::Output(ref command) => command.as_str(),
+                        };
+                        match copy_output {
+                            CopyOutput::All => clipboard.set_text(output_string)?,
+                            CopyOutput::Single(hint) => {
+                                let index = base26_to_base10(&hint)?;
+                                let split_output = split_string(output_string);
+                                let mut current = 0;
+                                let mut new_output = String::new();
+                                for element in split_output.iter() {
+                                    match element {
+                                        StringType::Word(w) => {
+                                            if current == index {
+                                                new_output.push_str(w);
+                                                break;
+                                            }
+                                            current += 1;
+                                        }
+                                        StringType::Newline(c) | StringType::Whitespace(c) => {
+                                            new_output.push_str(c);
+                                        }
+                                        StringType::Tab => {
+                                            new_output.push('\t');
+                                        }
+                                    }
+                                }
+                                clipboard.set_text(new_output)?;
                             }
-                            CurrentView::Output(ref command) => {
-                                clipboard.set_text(command.as_str())?;
-                                Ok(())
+                            CopyOutput::Range(beginning, end) => {
+                                let beginning_index = base26_to_base10(&beginning)?;
+                                let end_index = base26_to_base10(&end)?;
+                                if end_index < beginning_index {
+                                    return Ok(());
+                                }
+                                let split_output = split_string(output_string);
+                                let mut current = 0;
+                                let mut new_output = String::new();
+                                for element in split_output.iter() {
+                                    match element {
+                                        StringType::Word(w) => {
+                                            if current >= beginning_index && current <= end_index {
+                                                new_output.push_str(w);
+                                            }
+                                            if current == end_index {
+                                                break;
+                                            }
+                                            current += 1;
+                                        }
+                                        StringType::Newline(c) | StringType::Whitespace(c) => {
+                                            new_output.push_str(c);
+                                        }
+                                        StringType::Tab => {
+                                            new_output.push('\t');
+                                        }
+                                    }
+                                }
+                                clipboard.set_text(new_output)?;
                             }
                         }
+                        Ok(())
                     }
                     Command::ToggleHints => {
                         model.config.hint_state = match model.config.hint_state {

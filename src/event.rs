@@ -10,6 +10,7 @@ pub(crate) enum Event {
     Right,
     Character(char),
     MouseDown(u16, u16),
+    Paste(String),
 }
 
 pub(crate) fn wait_for_event() -> Event {
@@ -62,6 +63,7 @@ fn create_event(crossterm_event: crossterm::event::Event) -> Option<Event> {
             }
             _ => None,
         },
+        crossterm::event::Event::Paste(paste) => Some(Event::Paste(paste)),
         _ => None,
     }
 }

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use arboard::Clipboard;
 use crossterm::ExecutableCommand;
@@ -1520,6 +1520,17 @@ pub(crate) fn update(
                     directory.search.pop();
                     let _ = set_children(directory);
                     Ok(())
+                }
+                event::Event::Enter => {
+                    let directory_path = PathBuf::from(directory.search.as_str());
+                    if directory_path.is_dir() {
+                        directory.current_dir = directory_path;
+                        directory.search = String::new();
+                        let _ = set_children(directory);
+                        Ok(())
+                    } else {
+                        Ok(())
+                    }
                 }
                 _ => {
                     // do nothing

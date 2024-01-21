@@ -127,7 +127,7 @@ pub struct Directory {
     location: Option<Rect>,
 }
 
-#[derive(Debug, PartialEq, Ord, Eq, PartialOrd)]
+#[derive(Debug, PartialEq, Eq)]
 enum File {
     Directory(OsString),
     File(OsString),
@@ -138,6 +138,23 @@ impl fmt::Display for File {
         match self {
             File::Directory(s) => write!(f, "{}", s.to_string_lossy()),
             File::File(s) => write!(f, "{}", s.to_string_lossy()),
+        }
+    }
+}
+
+impl PartialOrd for File {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for File {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (File::Directory(a), File::File(b)) => a.cmp(b),
+            (File::File(a), File::Directory(b)) => a.cmp(b),
+            (File::Directory(a), File::Directory(b)) => a.cmp(b),
+            (File::File(a), File::File(b)) => a.cmp(b),
         }
     }
 }
@@ -329,5 +346,30 @@ impl Model {
             self.directory_history.push(current_directory);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn sort_files() {
+        let mut files = vec![
+            File::File(OsString::from("b")),
+            File::Directory(OsString::from("a")),
+            File::Directory(OsString::from("c")),
+            File::File(OsString::from("a")),
+        ];
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                File::Directory(OsString::from("a")),
+                File::File(OsString::from("a")),
+                File::File(OsString::from("b")),
+                File::Directory(OsString::from("c")),
+            ]
+        );
     }
 }

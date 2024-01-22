@@ -1,4 +1,10 @@
-use std::{ffi::OsString, fmt, path::PathBuf};
+use std::{
+    ffi::OsString,
+    fmt,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread::JoinHandle,
+};
 
 use arboard::Clipboard;
 use ratatui::layout::Rect;
@@ -18,19 +24,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = Clipboard::new()?;
     let mut terminal = tui::init_terminal()?;
-    let mut model = Model::default();
-    model.directory_history.push(std::env::current_dir()?);
+    let model = Arc::new(Mutex::new(Model::default()));
+    // SAFETY: no one has panicked while holding the mutex yet since
+    // this is the first access -> unwrap is ok
+    model
+        .lock()
+        .unwrap()
+        .directory_history
+        .push(std::env::current_dir()?);
+    model.lock().unwrap().config.hint_state = HintState::HideHints;
 
-    while !model.should_quit() {
-        terminal.draw(|frame| view::view(&mut model, frame))?;
+    loop {
+        {
+            let mut model = model.lock().map_err(|_| "lock failed")?;
+            terminal.draw(|frame| view::view(&mut model, frame))?;
+        }
 
-        let event = event::wait_for_event();
-        update::update(&mut model, event, &mut clipboard)?;
-        if model.should_quit() {
+        let model = Arc::clone(&model);
+        let event = event::get_event()?;
+        if let Some(event) = event {
+            update::update(&model, event, &mut clipboard)?;
+        }
+        if model.lock().map_err(|_| "lock failed")?.should_quit() {
             break;
         }
         while let Some(next_event) = event::get_event()? {
-            update::update(&mut model, next_event, &mut clipboard)?;
+            update::update(&model, next_event, &mut clipboard)?;
+        }
+        if model.lock().map_err(|_| "lock failed")?.should_quit() {
+            break;
         }
     }
 
@@ -109,13 +131,19 @@ fn split_string(input: &str) -> Vec<StringType> {
     result
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Default)]
 enum Mode {
     #[default]
     Idle,
     Command(String),
     Directory(Directory),
     Quit,
+    Executing(
+        bool,
+        u16,
+        std::sync::mpsc::Sender<()>,
+        JoinHandle<std::io::Result<()>>,
+    ),
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -185,20 +213,29 @@ struct Output {
     output_type: OutputType,
 }
 
-impl Output {
-    fn as_str(&self) -> &str {
+impl fmt::Display for Output {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.output_type {
-            OutputType::Success(output) => output.as_str(),
-            OutputType::Error(output) => output.as_str(),
-            OutputType::Empty => "",
+            OutputType::Success(stdout, stderr) | OutputType::Error(stdout, stderr) => {
+                if stdout.is_empty() && stderr.is_empty() {
+                    write!(f, "")
+                } else if stdout.is_empty() {
+                    write!(f, "{}", stderr)
+                } else if stderr.is_empty() {
+                    write!(f, "{}", stdout)
+                } else {
+                    write!(f, "STDERR:\n\n{}\nSTDOUT:\n\n{}", stderr, stdout)
+                }
+            }
+            OutputType::Empty => write!(f, ""),
         }
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 enum OutputType {
-    Success(String),
-    Error(String),
+    Success(String, String),
+    Error(String, String),
     #[default]
     Empty,
 }
@@ -247,12 +284,14 @@ impl CompletedCommand {
                                 origin,
                                 output_type: OutputType::Success(
                                     String::from_utf8_lossy(&executed_command.stdout).to_string(),
+                                    String::from_utf8_lossy(&executed_command.stderr).to_string(),
                                 ),
                             }
                         } else {
                             Output {
                                 origin,
                                 output_type: OutputType::Error(
+                                    String::from_utf8_lossy(&executed_command.stdout).to_string(),
                                     String::from_utf8_lossy(&executed_command.stderr).to_string(),
                                 ),
                             }
@@ -262,15 +301,18 @@ impl CompletedCommand {
                         if executed_command.kind() == std::io::ErrorKind::NotFound {
                             Output {
                                 origin,
-                                output_type: OutputType::Error(format!(
-                                    "Command not found: {}",
-                                    input
-                                )),
+                                output_type: OutputType::Error(
+                                    "".to_string(),
+                                    format!("Command not found: {}", input),
+                                ),
                             }
                         } else {
                             Output {
                                 origin,
-                                output_type: OutputType::Error(executed_command.to_string()),
+                                output_type: OutputType::Error(
+                                    "".to_string(),
+                                    executed_command.to_string(),
+                                ),
                             }
                         }
                     }
@@ -280,7 +322,7 @@ impl CompletedCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum CurrentView {
     CommandWithoutOutput(CommandWithoutOutput),
     Output(Output),
@@ -311,7 +353,7 @@ impl Default for CurrentView {
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Default)]
 struct Model {
     mode: Mode,
     config: Config,
@@ -324,7 +366,7 @@ struct Model {
 
 impl Model {
     fn should_quit(&self) -> bool {
-        self.mode == Mode::Quit
+        matches!(self.mode, Mode::Quit)
     }
 
     fn set_current_view_from_command(&mut self, cursor_position: u64, command: String) {

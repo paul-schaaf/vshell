@@ -451,31 +451,31 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
     }
 }
 
-fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
+fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
     let (output, block, origin) = match &model.current_command {
         CurrentView::CommandWithoutOutput(_) => {
             (None, Block::new().white().on_black().bold(), None)
         }
         CurrentView::Output(o) => match o.output_type {
-            OutputType::Success(_) | OutputType::Empty => (
-                Some(o.as_str()),
+            OutputType::Success(_, _) | OutputType::Empty => (
+                Some(o.to_string()),
                 Block::new().white().on_black().bold(),
                 Some(o.origin.clone()),
             ),
-            OutputType::Error(_) => (
-                Some(o.as_str()),
+            OutputType::Error(_, _) => (
+                Some(o.to_string()),
                 Block::new().red().on_black().bold(),
                 Some(o.origin.clone()),
             ),
         },
         CurrentView::CommandWithOutput(o) => match o.output.output_type {
-            OutputType::Success(_) | OutputType::Empty => (
-                Some(o.output.as_str()),
+            OutputType::Success(_, _) | OutputType::Empty => (
+                Some(o.output.to_string()),
                 Block::new().white().on_black().bold(),
                 Some(o.output.origin.clone()),
             ),
-            OutputType::Error(_) => (
-                Some(o.output.as_str()),
+            OutputType::Error(_, _) => (
+                Some(o.output.to_string()),
                 Block::new().red().on_black().bold(),
                 Some(o.output.origin.clone()),
             ),
@@ -490,7 +490,7 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                 let mut y = 1;
                 let mut index = 0;
 
-                let string_that_was_split = split_string(output);
+                let string_that_was_split = split_string(&output);
 
                 for word in string_that_was_split.iter() {
                     match word {
@@ -618,12 +618,12 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
 
     frame.render_widget(block.clone().borders(Borders::ALL), layout);
 
-    match origin {
+    let animation_x = match origin {
         Some(shell) => {
             let heading = format!("Output({})", shell);
             frame.render_widget(
                 Paragraph::new(heading.as_str())
-                    .block(block)
+                    .block(block.clone())
                     .wrap(Wrap { trim: false }),
                 Rect {
                     x: layout.x,
@@ -632,11 +632,12 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                     height: 1,
                 },
             );
+            layout.x + heading.len() as u16
         }
         None => {
             frame.render_widget(
                 Paragraph::new("Output")
-                    .block(block)
+                    .block(block.clone())
                     .wrap(Wrap { trim: false }),
                 Rect {
                     x: layout.x,
@@ -645,6 +646,58 @@ fn render_output(frame: &mut ratatui::Frame, model: &Model, layout: Rect) {
                     height: 1,
                 },
             );
+            layout.x + "Output".len() as u16
+        }
+    };
+
+    if let Mode::Executing(ref mut direction, ref mut index, _, _) = model.mode {
+        frame.render_widget(
+            Clear,
+            Rect {
+                x: animation_x,
+                y: layout.y,
+                width: layout.width - (animation_x - layout.x) - 1,
+                height: 1,
+            },
+        );
+
+        for cell in animation_x..animation_x + layout.width - (animation_x - layout.x) - 1 {
+            if cell == animation_x + *index {
+                frame.render_widget(
+                    Paragraph::new("-")
+                        .block(block.clone())
+                        .wrap(Wrap { trim: false }),
+                    Rect {
+                        x: cell,
+                        y: layout.y,
+                        width: 1,
+                        height: 1,
+                    },
+                );
+            } else {
+                frame.render_widget(
+                    Paragraph::new(" ")
+                        .block(block.clone())
+                        .wrap(Wrap { trim: false }),
+                    Rect {
+                        x: cell,
+                        y: layout.y,
+                        width: 1,
+                        height: 1,
+                    },
+                );
+            }
+        }
+        if *direction {
+            if *index == layout.width - (animation_x - layout.x) - 1 {
+                *direction = false;
+            } else {
+                *index += 1;
+            }
+        } else if *index == 0 {
+            *direction = true;
+        } else {
+            *index -= 1;
         }
     }
 }

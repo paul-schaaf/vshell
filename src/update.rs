@@ -1,4 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::{
+    mem,
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::{mpsc::Receiver, Arc, Mutex},
+    thread,
+};
 
 use arboard::Clipboard;
 use crossterm::ExecutableCommand;
@@ -293,7 +299,7 @@ impl TryFrom<&str> for Command {
 }
 
 pub(crate) fn update(
-    model: &mut Model,
+    model_lock: &Arc<Mutex<Model>>,
     event: event::Event,
     clipboard: &mut Clipboard,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -402,12 +408,10 @@ pub(crate) fn update(
         }
     }
 
-    if event == event::Event::CtrlC {
-        model.mode = Mode::Quit;
-        return Ok(());
-    }
-
-    fn execute_command(command_input: &str) -> CompletedCommand {
+    fn execute_command(
+        command_input: &str,
+        receiver: Receiver<()>,
+    ) -> std::io::Result<CompletedCommand> {
         // SAFETY: our shell handles input validation so this will not fail
         let command_list = shlex::split(command_input).unwrap();
 
@@ -415,109 +419,135 @@ pub(crate) fn update(
             if command_list.len() == 1 {
                 match dirs::home_dir() {
                     Some(home) => match std::env::set_current_dir(home) {
-                        Ok(_) => CompletedCommand {
+                        Ok(_) => Ok(CompletedCommand {
                             input: command_input.to_string(),
                             output: Output {
                                 origin: Origin::Vshell,
-                                output_type: OutputType::Success(String::new()),
+                                output_type: OutputType::Success(String::new(), String::new()),
                             },
-                        },
-                        Err(e) => CompletedCommand {
+                        }),
+                        Err(e) => Ok(CompletedCommand {
                             input: command_input.to_string(),
                             output: Output {
                                 origin: Origin::Vshell,
-                                output_type: OutputType::Error(format!("cd: {}", e)),
+                                output_type: OutputType::Error(String::new(), format!("cd: {}", e)),
                             },
-                        },
+                        }),
                     },
-                    None => CompletedCommand {
+                    None => Ok(CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
                             output_type: OutputType::Error(
+                                String::new(),
                                 "cd: could not find home directory".to_string(),
                             ),
                         },
-                    },
+                    }),
                 }
             } else if command_list.len() != 2 {
-                CompletedCommand {
+                Ok(CompletedCommand {
                     input: command_input.to_string(),
                     output: Output {
                         origin: Origin::Vshell,
                         output_type: OutputType::Error(
+                            String::new(),
                             "cd: incorrect number of arguments".to_string(),
                         ),
                     },
-                }
+                })
             } else if command_list[1].contains('~') {
                 match dirs::home_dir() {
                     Some(home) => {
                         let new_path = command_list[1].replace('~', &home.to_string_lossy());
                         match std::env::set_current_dir(new_path) {
-                            Ok(_) => CompletedCommand {
+                            Ok(_) => Ok(CompletedCommand {
                                 input: command_input.to_string(),
                                 output: Output {
                                     origin: Origin::Vshell,
-                                    output_type: OutputType::Success(String::new()),
+                                    output_type: OutputType::Success(String::new(), String::new()),
                                 },
-                            },
-                            Err(e) => CompletedCommand {
+                            }),
+                            Err(e) => Ok(CompletedCommand {
                                 input: command_input.to_string(),
                                 output: Output {
                                     origin: Origin::Vshell,
-                                    output_type: OutputType::Error(format!("cd: {}", e)),
+                                    output_type: OutputType::Error(
+                                        String::new(),
+                                        format!("cd: {}", e),
+                                    ),
                                 },
-                            },
+                            }),
                         }
                     }
-                    None => CompletedCommand {
+                    None => Ok(CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
                             output_type: OutputType::Error(
+                                String::new(),
                                 "cd: could not find home directory".to_string(),
                             ),
                         },
-                    },
+                    }),
                 }
             } else {
                 match std::env::set_current_dir(&command_list[1]) {
-                    Ok(_) => CompletedCommand {
+                    Ok(_) => Ok(CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
-                            output_type: OutputType::Success(String::new()),
+                            output_type: OutputType::Success(String::new(), String::new()),
                         },
-                    },
-                    Err(e) => CompletedCommand {
+                    }),
+                    Err(e) => Ok(CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
-                            output_type: OutputType::Error(format!("cd: {}", e)),
+                            output_type: OutputType::Error(String::new(), format!("cd: {}", e)),
                         },
-                    },
+                    }),
                 }
             }
         } else {
-            let executed_command = std::process::Command::new(&command_list[0])
+            let mut executed_command = std::process::Command::new(&command_list[0])
                 .args(
                     &command_list[1..]
                         .iter()
                         .filter(|s| !s.is_empty())
                         .collect::<Vec<&String>>(),
                 )
-                .output();
-            CompletedCommand::new(command_input.to_string(), executed_command, Origin::Vshell)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+
+            loop {
+                if executed_command.try_wait().is_err()
+                    || (executed_command.try_wait().is_ok()
+                        && executed_command.try_wait().unwrap().is_some())
+                {
+                    break;
+                }
+
+                if receiver.try_recv().is_ok() {
+                    executed_command.kill()?;
+                    break;
+                }
+            }
+
+            let executed_command = executed_command.wait_with_output();
+
+            Ok(CompletedCommand::new(
+                command_input.to_string(),
+                executed_command,
+                Origin::Vshell,
+            ))
         }
     }
 
+    let mut model = model_lock.lock().map_err(|_| "lock error")?;
     match &mut model.mode {
         Mode::Idle => match event {
-            event::Event::CtrlC => {
-                model.mode = Mode::Quit;
-                Ok(())
-            }
             event::Event::Backspace => {
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
@@ -546,40 +576,74 @@ pub(crate) fn update(
                 match &mut model.current_command {
                     CurrentView::CommandWithoutOutput(command) => {
                         if command.input.is_empty() {
+                            model.mode = Mode::Idle;
                             return Ok(());
                         }
                         if has_open_quote(&command.input).is_some() {
                             command.input.push('\n');
                             command.cursor_position = command.input.len() as u64;
+                            model.mode = Mode::Idle;
                             return Ok(());
                         }
                         // SAFETY: we just checked for empty so there must be at least 1 char
                         if command.input.ends_with('\\') {
                             command.input.push('\n');
                             command.cursor_position = command.input.len() as u64;
+                            model.mode = Mode::Idle;
                             return Ok(());
                         }
 
-                        let completed_command = execute_command(command.input.as_str());
-                        model.command_history.push(completed_command.clone());
-                        model.current_command =
-                            CurrentView::Output(completed_command.output.clone());
-                    }
-                    CurrentView::CommandWithOutput(command) => {
-                        let completed_command = execute_command(command.input.as_str());
-                        model.command_history.push(completed_command.clone());
-                        model.current_command =
-                            CurrentView::Output(completed_command.output.clone());
+                        let thread_model_lock = Arc::clone(model_lock);
+                        let (tx, rx) = std::sync::mpsc::channel::<()>();
+                        let input_string = command.input.clone();
+
+                        let handle = thread::spawn(move || {
+                            let completed_command = execute_command(input_string.as_str(), rx)?;
+                            let mut model =
+                                thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                            model.command_history.push(completed_command.clone());
+                            model.current_command =
+                                CurrentView::Output(completed_command.output.clone());
+                            model.command_history_index = model.command_history.len();
+                            model.mode = Mode::Idle;
+                            let _ = model.add_current_directory_to_history();
+                            Ok(())
+                        });
+                        model.mode = Mode::Executing(true, 0, tx, handle);
+                        Ok(())
                     }
                     CurrentView::Output(_) => {
                         // do nothing
+                        Ok(())
                     }
-                };
-                model.command_history_index = model.command_history.len();
-                if model.add_current_directory_to_history().is_err() {
-                    return Ok(());
+                    CurrentView::CommandWithOutput(command) => {
+                        let thread_model_lock = Arc::clone(model_lock);
+                        let (tx, rx) = std::sync::mpsc::channel::<()>();
+                        let input_string = command.input.clone();
+                        let handle = thread::spawn(move || {
+                            let mut model =
+                                thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                            model.current_command =
+                                CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                    cursor_position: input_string.len() as u64,
+                                    input: input_string.clone(),
+                                });
+                            drop(model);
+                            let completed_command = execute_command(input_string.as_str(), rx)?;
+                            let mut model =
+                                thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                            model.command_history.push(completed_command.clone());
+                            model.current_command =
+                                CurrentView::Output(completed_command.output.clone());
+                            model.command_history_index = model.command_history.len();
+                            model.mode = Mode::Idle;
+                            let _ = model.add_current_directory_to_history();
+                            Ok(())
+                        });
+                        model.mode = Mode::Executing(true, 0, tx, handle);
+                        Ok(())
+                    }
                 }
-                Ok(())
             }
             event::Event::Up => {
                 if model.command_history_index > 0 {
@@ -680,7 +744,7 @@ pub(crate) fn update(
                     }
                 }
             }
-            event::Event::Paste(text_to_insert) => paste(text_to_insert.as_str(), model),
+            event::Event::Paste(text_to_insert) => paste(text_to_insert.as_str(), &mut model),
             _ => {
                 // do nothing
                 Ok(())
@@ -690,10 +754,6 @@ pub(crate) fn update(
         // SAFETY: if Mode::QUIT has been set, the program will already have exited before it reaches this point
         Mode::Quit => unreachable!(),
         Mode::Command(command) => match event {
-            event::Event::CtrlC => {
-                model.mode = Mode::Quit;
-                Ok(())
-            }
             event::Event::Esc => {
                 model.mode = Mode::Idle;
                 Ok(())
@@ -720,10 +780,8 @@ pub(crate) fn update(
                     Command::Edit(edit) => {
                         match &model.current_command {
                             CurrentView::CommandWithOutput(command) => {
-                                model.set_current_view_from_command(
-                                    command.input.len() as u64,
-                                    command.input.clone(),
-                                );
+                                let command = command.input.clone();
+                                model.set_current_view_from_command(command.len() as u64, command);
                             }
                             CurrentView::Output(_) => {
                                 // do nothing
@@ -738,11 +796,11 @@ pub(crate) fn update(
                                     Edit::Single(hint) => {
                                         let index = base26_to_base10(&hint);
                                         if index.is_err() {
+                                            model.mode = Mode::Idle;
                                             return Ok(());
                                         }
                                         // SAFETY: just checked for err
                                         let index = index.unwrap();
-                                        model.mode = Mode::Idle;
                                         let mut split_command = split_string(&command.input);
                                         let mut current = 0;
                                         let mut new_cursor_position = 0;
@@ -770,7 +828,6 @@ pub(crate) fn update(
                                         }
                                         if let Some(index_to_delete) = index_to_delete {
                                             split_command.remove(index_to_delete);
-
                                             let new_command = split_command
                                                 .iter()
                                                 .map(|s| s.as_str())
@@ -785,23 +842,27 @@ pub(crate) fn update(
                                                     },
                                                 );
                                         }
+                                        model.mode = Mode::Idle;
                                         Ok(())
                                     }
                                     Edit::Range(beginning, end) => {
                                         let beginning_index = base26_to_base10(&beginning);
                                         if beginning_index.is_err() {
+                                            model.mode = Mode::Idle;
+
                                             return Ok(());
                                         }
                                         let end_index = base26_to_base10(&end);
                                         if end_index.is_err() {
+                                            model.mode = Mode::Idle;
                                             return Ok(());
                                         }
-                                        model.mode = Mode::Idle;
                                         // SAFETY: just checked for none
                                         let beginning_index = beginning_index.unwrap();
                                         // SAFETY: just checked for none
                                         let end_index = end_index.unwrap();
                                         if end_index < beginning_index {
+                                            model.mode = Mode::Idle;
                                             return Ok(());
                                         }
                                         let mut split_command = split_string(&command.input);
@@ -840,6 +901,7 @@ pub(crate) fn update(
                                             }
                                         }
                                         if indices_to_delete.is_empty() {
+                                            model.mode = Mode::Idle;
                                             return Ok(());
                                         }
                                         split_command
@@ -855,6 +917,7 @@ pub(crate) fn update(
                                                 input: new_command,
                                             },
                                         );
+                                        model.mode = Mode::Idle;
                                         Ok(())
                                     }
                                 }
@@ -893,10 +956,12 @@ pub(crate) fn update(
                                             + model.pinned_commands.len()
                                             - number
                                             - 1;
-                                        let completed_command = &model.command_history[index];
+                                        let completed_command =
+                                            model.command_history[index].input.clone();
+
                                         model.set_current_view_from_command(
-                                            completed_command.input.len() as u64,
-                                            completed_command.input.clone(),
+                                            completed_command.len() as u64,
+                                            completed_command,
                                         );
                                     };
                                 }
@@ -908,7 +973,9 @@ pub(crate) fn update(
                                     let directory = &model.directory_history[index];
                                     let new_command =
                                         format!("cd \"{}\"", directory.to_string_lossy());
-                                    let completed_command = execute_command(new_command.as_str());
+                                    let (_, rx) = std::sync::mpsc::channel::<()>(); // intentionally unused receiver
+                                    let completed_command =
+                                        execute_command(new_command.as_str(), rx)?;
                                     if model.add_current_directory_to_history().is_err() {
                                         return Ok(());
                                     }
@@ -925,10 +992,8 @@ pub(crate) fn update(
                     Command::JumpBefore(hint) => {
                         match &model.current_command {
                             CurrentView::CommandWithOutput(c) => {
-                                model.set_current_view_from_command(
-                                    c.input.len() as u64,
-                                    c.input.clone(),
-                                );
+                                let command = c.input.clone();
+                                model.set_current_view_from_command(command.len() as u64, command);
                             }
                             CurrentView::Output(_) => {
                                 // do nothing
@@ -983,10 +1048,8 @@ pub(crate) fn update(
                     Command::JumpAfter(hint) => {
                         match &model.current_command {
                             CurrentView::CommandWithOutput(c) => {
-                                model.set_current_view_from_command(
-                                    c.input.len() as u64,
-                                    c.input.clone(),
-                                );
+                                let command = c.input.clone();
+                                model.set_current_view_from_command(command.len() as u64, command);
                             }
                             CurrentView::Output(_) => {
                                 // do nothing
@@ -1053,9 +1116,11 @@ pub(crate) fn update(
                                     model.pinned_commands.remove(position);
                                     Ok(())
                                 } else {
+                                    let cursor_position = c.cursor_position;
+                                    let input = c.input.clone();
                                     model.pinned_commands.push(CommandWithoutOutput {
-                                        input: c.input.clone(),
-                                        cursor_position: c.cursor_position,
+                                        input,
+                                        cursor_position,
                                     });
                                     Ok(())
                                 }
@@ -1077,9 +1142,10 @@ pub(crate) fn update(
                                     model.pinned_commands.remove(position);
                                     Ok(())
                                 } else {
+                                    let input = c.input.clone();
                                     model.pinned_commands.push(CommandWithoutOutput {
-                                        input: c.input.clone(),
-                                        cursor_position: c.input.len() as u64,
+                                        cursor_position: input.len() as u64,
+                                        input,
                                     });
                                     Ok(())
                                 }
@@ -1093,14 +1159,16 @@ pub(crate) fn update(
                                 // do nothing
                                 return Ok(());
                             }
-                            CurrentView::CommandWithOutput(ref command) => command.output.as_str(),
-                            CurrentView::Output(ref command) => command.as_str(),
+                            CurrentView::CommandWithOutput(ref command) => {
+                                command.output.to_string()
+                            }
+                            CurrentView::Output(ref command) => command.to_string(),
                         };
                         match copy_output {
                             CopyOutput::All => clipboard.set_text(output_string)?,
                             CopyOutput::Single(hint) => {
                                 let index = base26_to_base10(&hint)?;
-                                let split_output = split_string(output_string);
+                                let split_output = split_string(&output_string);
                                 let mut current = 0;
                                 let mut new_output = String::new();
                                 for element in split_output.iter() {
@@ -1128,7 +1196,7 @@ pub(crate) fn update(
                                 if end_index < beginning_index {
                                     return Ok(());
                                 }
-                                let split_output = split_string(output_string);
+                                let split_output = split_string(&output_string);
                                 let mut current = 0;
                                 let mut new_output = String::new();
                                 for element in split_output.iter() {
@@ -1165,14 +1233,15 @@ pub(crate) fn update(
                     }
                     Command::Paste => {
                         model.mode = Mode::Idle;
-                        paste(clipboard.get_text()?.as_str(), model)
+                        paste(clipboard.get_text()?.as_str(), &mut model)
                     }
                     Command::ShellExecute(shell, prefix) => {
                         fn executed_shell_command(
                             shell: &str,
                             command: &str,
                             prefix: Option<String>,
-                        ) -> CompletedCommand {
+                            receiver: Receiver<()>,
+                        ) -> std::io::Result<CompletedCommand> {
                             let command = match prefix {
                                 None => command.to_string(),
                                 Some(mut prefix) => {
@@ -1181,16 +1250,34 @@ pub(crate) fn update(
                                 }
                             };
 
-                            let executed_command = std::process::Command::new(shell)
+                            let mut executed_command = std::process::Command::new(shell)
                                 .arg("-c")
                                 .arg(&command)
-                                .output();
+                                .stdout(Stdio::piped())
+                                .stderr(Stdio::piped())
+                                .spawn()?;
 
-                            CompletedCommand::new(
+                            loop {
+                                if executed_command.try_wait().is_err()
+                                    || (executed_command.try_wait().is_ok()
+                                        && executed_command.try_wait().unwrap().is_some())
+                                {
+                                    break;
+                                }
+
+                                if receiver.try_recv().is_ok() {
+                                    executed_command.kill()?;
+                                    break;
+                                }
+                            }
+
+                            let executed_command = executed_command.wait_with_output();
+
+                            Ok(CompletedCommand::new(
                                 command.to_string(),
                                 executed_command,
                                 Origin::Other(shell.to_string()),
-                            )
+                            ))
                         }
 
                         model.mode = Mode::Idle;
@@ -1211,25 +1298,56 @@ pub(crate) fn update(
                                     return Ok(());
                                 }
 
-                                let completed_command =
-                                    executed_shell_command(&shell, command.input.as_str(), prefix);
-                                model.command_history.push(completed_command.clone());
-                                model.current_command =
-                                    CurrentView::Output(completed_command.output.clone());
+                                let thread_model_lock = Arc::clone(model_lock);
+                                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                                let input_string = command.input.clone();
+
+                                let handle = thread::spawn(move || {
+                                    let completed_command =
+                                        executed_shell_command(&shell, &input_string, prefix, rx)?;
+                                    let mut model =
+                                        thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                                    model.command_history.push(completed_command.clone());
+                                    model.current_command =
+                                        CurrentView::Output(completed_command.output.clone());
+                                    model.command_history_index = model.command_history.len();
+                                    let _ = model.add_current_directory_to_history();
+                                    model.mode = Mode::Idle;
+                                    Ok(())
+                                });
+                                model.mode = Mode::Executing(true, 0, tx, handle);
                             }
                             CurrentView::CommandWithOutput(command) => {
-                                let completed_command =
-                                    executed_shell_command(&shell, command.input.as_str(), prefix);
-                                model.command_history.push(completed_command.clone());
-                                model.current_command =
-                                    CurrentView::Output(completed_command.output.clone());
+                                let thread_model_lock = Arc::clone(model_lock);
+                                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                                let input_string = command.input.clone();
+                                let handle = thread::spawn(move || {
+                                    let mut model =
+                                        thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                                    model.current_command =
+                                        CurrentView::CommandWithoutOutput(CommandWithoutOutput {
+                                            cursor_position: input_string.len() as u64,
+                                            input: input_string.clone(),
+                                        });
+                                    drop(model);
+                                    let completed_command =
+                                        executed_shell_command(&shell, &input_string, prefix, rx)?;
+                                    let mut model =
+                                        thread_model_lock.lock().map_err(|_| "lock error").unwrap();
+                                    model.command_history.push(completed_command.clone());
+                                    model.current_command =
+                                        CurrentView::Output(completed_command.output.clone());
+                                    model.command_history_index = model.command_history.len();
+                                    let _ = model.add_current_directory_to_history();
+                                    model.mode = Mode::Idle;
+                                    Ok(())
+                                });
+                                model.mode = Mode::Executing(true, 0, tx, handle);
                             }
                             CurrentView::Output(_) => {
                                 // do nothing
                             }
                         };
-                        model.command_history_index = model.command_history.len();
-                        let _ = model.add_current_directory_to_history();
                         Ok(())
                     }
                     Command::Replace(replace) => match replace {
@@ -1537,6 +1655,20 @@ pub(crate) fn update(
                     Ok(())
                 }
             }
+        }
+        Mode::Executing(_, _, _, _) => {
+            if event == event::Event::CtrlC {
+                let executing_mode = mem::replace(&mut model.mode, Mode::Idle);
+                drop(model);
+                match executing_mode {
+                    Mode::Executing(_, _, sender, handle) => {
+                        sender.send(()).unwrap();
+                        handle.join().map_err(|_| "thread join error")??;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Ok(())
         }
     }
 }

@@ -13,20 +13,8 @@ pub(crate) enum Event {
     Paste(String),
 }
 
-pub(crate) fn wait_for_event() -> Event {
-    loop {
-        if let Ok(crossterm_event) = crossterm::event::read() {
-            if let Some(event) = create_event(crossterm_event) {
-                return event;
-            }
-        }
-    }
-}
-
 pub(crate) fn get_event() -> Result<Option<Event>, Box<dyn std::error::Error>> {
-    // TODO: remove unwrap
-    if crossterm::event::poll(std::time::Duration::from_secs(0))? {
-        // TODO: remove unwrap
+    if crossterm::event::poll(std::time::Duration::from_millis(32))? {
         Ok(create_event(crossterm::event::read()?))
     } else {
         Ok(None)

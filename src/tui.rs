@@ -36,7 +36,6 @@ pub(crate) fn install_panic_hook() {
         stdout().execute(LeaveAlternateScreen).unwrap();
 
         disable_raw_mode().unwrap();
-        println!("hello world, hello world, hello world\n");
         std::io::stdout().flush().unwrap();
         original_hook(panic_info);
     }));

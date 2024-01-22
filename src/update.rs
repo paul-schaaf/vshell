@@ -408,10 +408,7 @@ pub(crate) fn update(
         }
     }
 
-    fn execute_command(
-        command_input: &str,
-        receiver: Receiver<()>,
-    ) -> std::io::Result<CompletedCommand> {
+    fn execute_command(command_input: &str, receiver: Receiver<()>) -> CompletedCommand {
         // SAFETY: our shell handles input validation so this will not fail
         let command_list = shlex::split(command_input).unwrap();
 
@@ -419,22 +416,22 @@ pub(crate) fn update(
             if command_list.len() == 1 {
                 match dirs::home_dir() {
                     Some(home) => match std::env::set_current_dir(home) {
-                        Ok(_) => Ok(CompletedCommand {
+                        Ok(_) => CompletedCommand {
                             input: command_input.to_string(),
                             output: Output {
                                 origin: Origin::Vshell,
                                 output_type: OutputType::Success(String::new(), String::new()),
                             },
-                        }),
-                        Err(e) => Ok(CompletedCommand {
+                        },
+                        Err(e) => CompletedCommand {
                             input: command_input.to_string(),
                             output: Output {
                                 origin: Origin::Vshell,
                                 output_type: OutputType::Error(String::new(), format!("cd: {}", e)),
                             },
-                        }),
+                        },
                     },
-                    None => Ok(CompletedCommand {
+                    None => CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
@@ -443,10 +440,10 @@ pub(crate) fn update(
                                 "cd: could not find home directory".to_string(),
                             ),
                         },
-                    }),
+                    },
                 }
             } else if command_list.len() != 2 {
-                Ok(CompletedCommand {
+                CompletedCommand {
                     input: command_input.to_string(),
                     output: Output {
                         origin: Origin::Vshell,
@@ -455,20 +452,20 @@ pub(crate) fn update(
                             "cd: incorrect number of arguments".to_string(),
                         ),
                     },
-                })
+                }
             } else if command_list[1].contains('~') {
                 match dirs::home_dir() {
                     Some(home) => {
                         let new_path = command_list[1].replace('~', &home.to_string_lossy());
                         match std::env::set_current_dir(new_path) {
-                            Ok(_) => Ok(CompletedCommand {
+                            Ok(_) => CompletedCommand {
                                 input: command_input.to_string(),
                                 output: Output {
                                     origin: Origin::Vshell,
                                     output_type: OutputType::Success(String::new(), String::new()),
                                 },
-                            }),
-                            Err(e) => Ok(CompletedCommand {
+                            },
+                            Err(e) => CompletedCommand {
                                 input: command_input.to_string(),
                                 output: Output {
                                     origin: Origin::Vshell,
@@ -477,10 +474,10 @@ pub(crate) fn update(
                                         format!("cd: {}", e),
                                     ),
                                 },
-                            }),
+                            },
                         }
                     }
-                    None => Ok(CompletedCommand {
+                    None => CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
@@ -489,28 +486,28 @@ pub(crate) fn update(
                                 "cd: could not find home directory".to_string(),
                             ),
                         },
-                    }),
+                    },
                 }
             } else {
                 match std::env::set_current_dir(&command_list[1]) {
-                    Ok(_) => Ok(CompletedCommand {
+                    Ok(_) => CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
                             output_type: OutputType::Success(String::new(), String::new()),
                         },
-                    }),
-                    Err(e) => Ok(CompletedCommand {
+                    },
+                    Err(e) => CompletedCommand {
                         input: command_input.to_string(),
                         output: Output {
                             origin: Origin::Vshell,
                             output_type: OutputType::Error(String::new(), format!("cd: {}", e)),
                         },
-                    }),
+                    },
                 }
             }
         } else {
-            let mut executed_command = std::process::Command::new(&command_list[0])
+            let executed_command = std::process::Command::new(&command_list[0])
                 .args(
                     &command_list[1..]
                         .iter()
@@ -519,29 +516,70 @@ pub(crate) fn update(
                 )
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .spawn()?;
+                .spawn();
 
-            loop {
-                if executed_command.try_wait().is_err()
-                    || (executed_command.try_wait().is_ok()
-                        && executed_command.try_wait().unwrap().is_some())
-                {
-                    break;
+            match executed_command {
+                Err(e) => {
+                    let error_string = match e.kind() {
+                        std::io::ErrorKind::NotFound => {
+                            format!("Command not found: {}", command_list[0])
+                        }
+                        std::io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
+                        _ => format!("Could not spawn process: {}", e),
+                    };
+                    CompletedCommand {
+                        input: command_input.to_string(),
+                        output: Output {
+                            origin: Origin::Vshell,
+                            output_type: OutputType::Error(String::new(), error_string),
+                        },
+                    }
                 }
+                Ok(mut executed_command) => {
+                    loop {
+                        if executed_command.try_wait().is_err()
+                            || (executed_command.try_wait().is_ok()
+                                && executed_command.try_wait().unwrap().is_some())
+                        {
+                            break;
+                        }
 
-                if receiver.try_recv().is_ok() {
-                    executed_command.kill()?;
-                    break;
+                        if receiver.try_recv().is_ok() {
+                            let result = executed_command.kill();
+
+                            if let Err(e) = result {
+                                let error_string = match e.kind() {
+                                    std::io::ErrorKind::NotFound => {
+                                        format!("Command not found: {}", command_list[0])
+                                    }
+                                    std::io::ErrorKind::PermissionDenied => {
+                                        "Permission denied".to_string()
+                                    }
+                                    _ => format!("Could not kill process: {}", e),
+                                };
+
+                                return CompletedCommand {
+                                    input: command_input.to_string(),
+                                    output: Output {
+                                        origin: Origin::Vshell,
+                                        output_type: OutputType::Error(String::new(), error_string),
+                                    },
+                                };
+                            }
+
+                            break;
+                        }
+                    }
+
+                    let executed_command = executed_command.wait_with_output();
+
+                    CompletedCommand::new(
+                        command_input.to_string(),
+                        executed_command,
+                        Origin::Vshell,
+                    )
                 }
             }
-
-            let executed_command = executed_command.wait_with_output();
-
-            Ok(CompletedCommand::new(
-                command_input.to_string(),
-                executed_command,
-                Origin::Vshell,
-            ))
         }
     }
 
@@ -598,7 +636,7 @@ pub(crate) fn update(
                         let input_string = command.input.clone();
 
                         let handle = thread::spawn(move || {
-                            let completed_command = execute_command(input_string.as_str(), rx)?;
+                            let completed_command = execute_command(input_string.as_str(), rx);
                             let mut model =
                                 thread_model_lock.lock().map_err(|_| "lock error").unwrap();
                             model.command_history.push(completed_command.clone());
@@ -607,7 +645,6 @@ pub(crate) fn update(
                             model.command_history_index = model.command_history.len();
                             model.mode = Mode::Idle;
                             let _ = model.add_current_directory_to_history();
-                            Ok(())
                         });
                         model.mode = Mode::Executing(true, 0, tx, handle);
                         Ok(())
@@ -629,7 +666,7 @@ pub(crate) fn update(
                                     input: input_string.clone(),
                                 });
                             drop(model);
-                            let completed_command = execute_command(input_string.as_str(), rx)?;
+                            let completed_command = execute_command(input_string.as_str(), rx);
                             let mut model =
                                 thread_model_lock.lock().map_err(|_| "lock error").unwrap();
                             model.command_history.push(completed_command.clone());
@@ -638,7 +675,6 @@ pub(crate) fn update(
                             model.command_history_index = model.command_history.len();
                             model.mode = Mode::Idle;
                             let _ = model.add_current_directory_to_history();
-                            Ok(())
                         });
                         model.mode = Mode::Executing(true, 0, tx, handle);
                         Ok(())
@@ -975,7 +1011,7 @@ pub(crate) fn update(
                                         format!("cd \"{}\"", directory.to_string_lossy());
                                     let (_, rx) = std::sync::mpsc::channel::<()>(); // intentionally unused receiver
                                     let completed_command =
-                                        execute_command(new_command.as_str(), rx)?;
+                                        execute_command(new_command.as_str(), rx);
                                     if model.add_current_directory_to_history().is_err() {
                                         return Ok(());
                                     }
@@ -1236,12 +1272,12 @@ pub(crate) fn update(
                         paste(clipboard.get_text()?.as_str(), &mut model)
                     }
                     Command::ShellExecute(shell, prefix) => {
-                        fn executed_shell_command(
+                        fn execute_shell_command(
                             shell: &str,
                             command: &str,
                             prefix: Option<String>,
                             receiver: Receiver<()>,
-                        ) -> std::io::Result<CompletedCommand> {
+                        ) -> CompletedCommand {
                             let command = match prefix {
                                 None => command.to_string(),
                                 Some(mut prefix) => {
@@ -1250,34 +1286,67 @@ pub(crate) fn update(
                                 }
                             };
 
-                            let mut executed_command = std::process::Command::new(shell)
+                            let executed_command = std::process::Command::new(shell)
                                 .arg("-c")
                                 .arg(&command)
                                 .stdout(Stdio::piped())
                                 .stderr(Stdio::piped())
-                                .spawn()?;
+                                .spawn();
 
-                            loop {
-                                if executed_command.try_wait().is_err()
-                                    || (executed_command.try_wait().is_ok()
-                                        && executed_command.try_wait().unwrap().is_some())
-                                {
-                                    break;
+                            match executed_command {
+                                Err(e) => {
+                                    CompletedCommand {
+                                        input: command.to_string(),
+                                        output: Output {
+                                            origin: Origin::Other(shell.to_string()),
+                                            output_type: OutputType::Error(
+                                                String::new(),
+                                                format!("Could not spawn process: {}", e),
+                                            ),
+                                        },
+                                    }
                                 }
+                                Ok(mut executed_command) => {
+                                    loop {
+                                        if executed_command.try_wait().is_err()
+                                            || (executed_command.try_wait().is_ok()
+                                                && executed_command.try_wait().unwrap().is_some())
+                                        {
+                                            break;
+                                        }
 
-                                if receiver.try_recv().is_ok() {
-                                    executed_command.kill()?;
-                                    break;
+                                        if receiver.try_recv().is_ok() {
+                                            let result = executed_command.kill();
+
+                                            if let Err(e) = result {
+                                                return CompletedCommand {
+                                                    input: command.to_string(),
+                                                    output: Output {
+                                                        origin: Origin::Other(shell.to_string()),
+                                                        output_type: OutputType::Error(
+                                                            String::new(),
+                                                            format!(
+                                                                "Could not kill process: {}",
+                                                                e
+                                                            ),
+                                                        ),
+                                                    },
+                                                };
+                                            }
+
+                                            break;
+                                        }
+                                    }
+
+                                    let executed_command = executed_command.wait_with_output();
+
+                                    CompletedCommand::new(
+                                        command.to_string(),
+                                        executed_command,
+                                        Origin::Other(shell.to_string()),
+                                    )
                                 }
                             }
-
-                            let executed_command = executed_command.wait_with_output();
-
-                            Ok(CompletedCommand::new(
-                                command.to_string(),
-                                executed_command,
-                                Origin::Other(shell.to_string()),
-                            ))
                         }
 
                         model.mode = Mode::Idle;
@@ -1304,7 +1373,7 @@ pub(crate) fn update(
 
                                 let handle = thread::spawn(move || {
                                     let completed_command =
-                                        executed_shell_command(&shell, &input_string, prefix, rx)?;
+                                        execute_shell_command(&shell, &input_string, prefix, rx);
                                     let mut model =
                                         thread_model_lock.lock().map_err(|_| "lock error").unwrap();
                                     model.command_history.push(completed_command.clone());
@@ -1313,7 +1382,6 @@ pub(crate) fn update(
                                     model.command_history_index = model.command_history.len();
                                     let _ = model.add_current_directory_to_history();
                                     model.mode = Mode::Idle;
-                                    Ok(())
                                 });
                                 model.mode = Mode::Executing(true, 0, tx, handle);
                             }
@@ -1331,7 +1399,7 @@ pub(crate) fn update(
                                         });
                                     drop(model);
                                     let completed_command =
-                                        executed_shell_command(&shell, &input_string, prefix, rx)?;
+                                        execute_shell_command(&shell, &input_string, prefix, rx);
                                     let mut model =
                                         thread_model_lock.lock().map_err(|_| "lock error").unwrap();
                                     model.command_history.push(completed_command.clone());
@@ -1340,7 +1408,6 @@ pub(crate) fn update(
                                     model.command_history_index = model.command_history.len();
                                     let _ = model.add_current_directory_to_history();
                                     model.mode = Mode::Idle;
-                                    Ok(())
                                 });
                                 model.mode = Mode::Executing(true, 0, tx, handle);
                             }
@@ -1663,7 +1730,7 @@ pub(crate) fn update(
                 match executing_mode {
                     Mode::Executing(_, _, sender, handle) => {
                         sender.send(()).unwrap();
-                        handle.join().map_err(|_| "thread join error")??;
+                        handle.join().map_err(|_| "thread join error")?;
                     }
                     _ => unreachable!(),
                 }

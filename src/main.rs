@@ -138,12 +138,7 @@ enum Mode {
     Command(String),
     Directory(Directory),
     Quit,
-    Executing(
-        bool,
-        u16,
-        std::sync::mpsc::Sender<()>,
-        JoinHandle<std::io::Result<()>>,
-    ),
+    Executing(bool, u16, std::sync::mpsc::Sender<()>, JoinHandle<()>),
 }
 
 #[derive(Debug, PartialEq, Default)]

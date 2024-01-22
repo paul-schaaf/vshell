@@ -3,7 +3,10 @@ use crossterm::{
     ExecutableCommand,
 };
 use ratatui::prelude::*;
-use std::{io::stdout, panic};
+use std::{
+    io::{stdout, Write},
+    panic,
+};
 
 pub(crate) fn init_terminal() -> Result<Terminal<impl Backend>, Box<dyn std::error::Error>> {
     enable_raw_mode()?;
@@ -33,6 +36,8 @@ pub(crate) fn install_panic_hook() {
         stdout().execute(LeaveAlternateScreen).unwrap();
 
         disable_raw_mode().unwrap();
+        println!("hello world, hello world, hello world\n");
+        std::io::stdout().flush().unwrap();
         original_hook(panic_info);
     }));
 }

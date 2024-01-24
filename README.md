@@ -24,6 +24,7 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [x] execute commands using other shells (`bash`,`zsh`,`fish` etc.)
 - [x] search and replace
 - [x] select directories by clicking
+- [ ] pagination
 - [ ] expanding globs(*)
 - [ ] unicode support
 - [ ] piping commands
@@ -34,8 +35,6 @@ Go [here](https://github.com/paul-schaaf/vshell-commands) for a list of talon co
 - [ ] variable expansion
 - [ ] ssh
 
-# Known Bugs
-  - if your input is larger than the window for it, the program will crash
 
 # Installation
 

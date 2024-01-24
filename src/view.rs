@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Clear, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, ListItem, Paragraph, Widget, Wrap},
 };
 
 use crate::{split_string, CurrentView, File, Mode, Model, OutputType, StringType};
@@ -24,20 +24,24 @@ pub(crate) fn view(model: &mut Model, frame: &mut ratatui::Frame) {
         ])
         .split(outer_layout[0]);
 
-    frame.render_widget(
+    safe_render(
+        frame,
         ratatui::widgets::Block::new()
             .white()
             .on_black()
             .borders(ratatui::widgets::Borders::ALL),
         left_layout[0],
+        frame.size().height,
     );
 
-    frame.render_widget(
+    safe_render(
+        frame,
         ratatui::widgets::Block::new()
             .white()
             .on_black()
             .borders(ratatui::widgets::Borders::ALL),
         left_layout[1],
+        frame.size().height,
     );
 
     render_output(frame, model, outer_layout[1]);
@@ -52,7 +56,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut ratatui::Frame) {
     }
 
     if let Mode::Command(command) = &model.mode {
-        frame.render_widget(
+        safe_render(
+            frame,
             Clear,
             Rect {
                 x: outer_layout[0].x,
@@ -60,9 +65,11 @@ pub(crate) fn view(model: &mut Model, frame: &mut ratatui::Frame) {
                 width: outer_layout[0].width + outer_layout[1].width,
                 height: 3,
             },
+            frame.size().height,
         );
 
-        frame.render_widget(
+        safe_render(
+            frame,
             ratatui::widgets::Paragraph::new(command.as_str())
                 .block(Block::new().white().on_black().bold().borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
@@ -72,6 +79,7 @@ pub(crate) fn view(model: &mut Model, frame: &mut ratatui::Frame) {
                 width: outer_layout[0].width + outer_layout[1].width,
                 height: 3,
             },
+            frame.size().height,
         );
     }
 
@@ -93,6 +101,14 @@ fn base10_to_base26(mut num: u32) -> String {
 
 const TAB_STRING: &str = "|-->";
 
+pub fn safe_render<W>(frame: &mut ratatui::Frame, widget: W, area: Rect, upper_limit: u16)
+where
+    W: Widget,
+{
+    if area.y < upper_limit {
+        frame.render_widget(widget, area)
+    }
+}
 fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
     let writable_width = layout.width - 2;
     let mut x = 1;
@@ -103,7 +119,8 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
     let string_that_was_split = split_string(model.current_command.input_str().unwrap_or_default());
 
     if string_that_was_split.is_empty() {
-        frame.render_widget(
+        safe_render(
+            frame,
             Block::new().on_green(),
             Rect {
                 x,
@@ -111,6 +128,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 width: 1,
                 height: 1,
             },
+            frame.size().height,
         );
     }
 
@@ -138,7 +156,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 if x + 1 + string_to_render.len() as u16 > layout.width {
                     let mut character_amount = 0;
                     let mut space_left = layout.width - x - 1;
-                    // frame.render_widget(
+                    // safe_render(frame,
                     //     Paragraph::new(space_left.to_string())
                     //         .block(Block::new().white().on_red())
                     //         .wrap(Wrap { trim: false }),
@@ -169,11 +187,13 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                             height: 1,
                         };
 
-                        frame.render_widget(
+                        safe_render(
+                            frame,
                             Paragraph::new(current_string.as_str())
                                 .block(Block::new().white().on_black())
                                 .wrap(Wrap { trim: false }),
                             location,
+                            frame.size().height,
                         );
 
                         if let Some(cursor_position_inside_content) = cursor_position_inside_content
@@ -192,7 +212,12 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                     width: 1,
                                     height: 1,
                                 };
-                                frame.render_widget(Block::new().on_green(), cursor_location);
+                                safe_render(
+                                    frame,
+                                    Block::new().on_green(),
+                                    cursor_location,
+                                    frame.size().height,
+                                );
                             }
                         }
                         character_amount += current_string.len() as u64;
@@ -205,11 +230,13 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                         width: string_to_render.len() as u16,
                         height: 1,
                     };
-                    frame.render_widget(
+                    safe_render(
+                        frame,
                         Paragraph::new(string_to_render.as_str())
                             .block(Block::new().white().on_black())
                             .wrap(Wrap { trim: false }),
                         location,
+                        frame.size().height,
                     );
                     x += string_to_render.len() as u16;
 
@@ -234,15 +261,22 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                             };
 
                             if cursor_position_inside_content == content.len() as u64 {
-                                frame.render_widget(Block::new().on_green(), cursor_location);
+                                safe_render(
+                                    frame,
+                                    Block::new().on_green(),
+                                    cursor_location,
+                                    frame.size().height,
+                                );
                             } else {
-                                frame.render_widget(
+                                safe_render(
+                                    frame,
                                     Paragraph::new(
                                         &content[cursor_position_inside_content as usize
                                             ..=cursor_position_inside_content as usize],
                                     )
                                     .block(Block::new().white().on_green()),
                                     cursor_location,
+                                    frame.size().height,
                                 );
                             }
                         }
@@ -310,7 +344,12 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                             height: 1,
                         };
 
-                        frame.render_widget(Block::new().on_green(), cursor_location);
+                        safe_render(
+                            frame,
+                            Block::new().on_green(),
+                            cursor_location,
+                            frame.size().height,
+                        );
                     }
                 } else {
                     for _ in content.chars() {
@@ -345,11 +384,13 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                     width: TAB_STRING.len() as u16,
                     height: 1,
                 };
-                frame.render_widget(
+                safe_render(
+                    frame,
                     Paragraph::new(TAB_STRING)
                         .block(Block::new().white().on_black())
                         .wrap(Wrap { trim: false }),
                     location,
+                    frame.size().height,
                 );
                 x += TAB_STRING.len() as u16;
                 if let Some(cursor_position_inside_content) = cursor_position_inside_content {
@@ -361,7 +402,12 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                 width: TAB_STRING.len() as u16,
                                 height: 1,
                             };
-                            frame.render_widget(Block::new().on_green(), cursor_location);
+                            safe_render(
+                                frame,
+                                Block::new().on_green(),
+                                cursor_location,
+                                frame.size().height,
+                            );
                         }
                         1 => {
                             if !(string_that_was_split.get(word_index + 1).is_some()
@@ -382,7 +428,12 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                     width: 1,
                                     height: 1,
                                 };
-                                frame.render_widget(Block::new().on_green(), cursor_location);
+                                safe_render(
+                                    frame,
+                                    Block::new().on_green(),
+                                    cursor_location,
+                                    frame.size().height,
+                                );
                             }
                         }
                         _ => unreachable!(),
@@ -410,7 +461,12 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                         height: 1,
                     };
 
-                    frame.render_widget(Block::new().on_green(), cursor_location);
+                    safe_render(
+                        frame,
+                        Block::new().on_green(),
+                        cursor_location,
+                        frame.size().height,
+                    );
                 }
             }
         }
@@ -425,7 +481,8 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
         let (_, end) = directory_header.split_at(directory_header.len() - (layout.width as usize));
         let (_, end) = end.split_at(12);
         let header = format!("Input - ...{}", end);
-        frame.render_widget(
+        safe_render(
+            frame,
             ratatui::widgets::Paragraph::new(header.as_str())
                 .block(Block::new().white().on_black().bold())
                 .wrap(Wrap { trim: false }),
@@ -435,9 +492,11 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 width: header.len() as u16,
                 height: 1,
             },
+            frame.size().height,
         );
     } else {
-        frame.render_widget(
+        safe_render(
+            frame,
             ratatui::widgets::Paragraph::new(directory_header.as_str())
                 .block(Block::new().white().on_black().bold())
                 .wrap(Wrap { trim: false }),
@@ -447,6 +506,7 @@ fn render_input(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 width: directory_header.len() as u16,
                 height: 1,
             },
+            frame.size().height,
         );
     }
 }
@@ -505,7 +565,7 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                             let mut string_to_render = format!("{}{}", hint, content);
                             if x + 1 + string_to_render.len() as u16 > layout.width + layout.x {
                                 let mut space_left = layout.x + layout.width - x - 1;
-                                // frame.render_widget(
+                                // safe_render(frame,
                                 //     Paragraph::new(space_left.to_string())
                                 //         .block(Block::new().white().on_red())
                                 //         .wrap(Wrap { trim: false }),
@@ -541,11 +601,13 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                         height: 1,
                                     };
 
-                                    frame.render_widget(
+                                    safe_render(
+                                        frame,
                                         Paragraph::new(current_string.as_str())
                                             .block(Block::new().white().on_black())
                                             .wrap(Wrap { trim: false }),
                                         location,
+                                        frame.size().height,
                                     );
                                     x += current_string.len() as u16;
                                 }
@@ -556,11 +618,13 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                     width: string_to_render.len() as u16,
                                     height: 1,
                                 };
-                                frame.render_widget(
+                                safe_render(
+                                    frame,
                                     Paragraph::new(string_to_render.as_str())
                                         .block(Block::new().white().on_black())
                                         .wrap(Wrap { trim: false }),
                                     location,
+                                    frame.size().height,
                                 );
                                 x += string_to_render.len() as u16;
                             }
@@ -588,11 +652,13 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                                 width: TAB_STRING.len() as u16,
                                 height: 1,
                             };
-                            frame.render_widget(
+                            safe_render(
+                                frame,
                                 Paragraph::new(TAB_STRING)
                                     .block(Block::new().white().on_black())
                                     .wrap(Wrap { trim: false }),
                                 location,
+                                frame.size().height,
                             );
                             x += TAB_STRING.len() as u16;
                         }
@@ -604,24 +670,37 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 }
             }
             crate::HintState::HideHints => {
-                frame.render_widget(
+                safe_render(
+                    frame,
                     Paragraph::new(output)
                         .block(block.clone().borders(Borders::ALL))
                         .wrap(Wrap { trim: false }),
                     layout,
+                    frame.size().height,
                 );
             }
         }
     } else {
-        frame.render_widget(block.clone().borders(Borders::ALL), layout);
+        safe_render(
+            frame,
+            block.clone().borders(Borders::ALL),
+            layout,
+            frame.size().height,
+        );
     }
 
-    frame.render_widget(block.clone().borders(Borders::ALL), layout);
+    safe_render(
+        frame,
+        block.clone().borders(Borders::ALL),
+        layout,
+        frame.size().height,
+    );
 
     let animation_x = match origin {
         Some(shell) => {
             let heading = format!("Output({})", shell);
-            frame.render_widget(
+            safe_render(
+                frame,
                 Paragraph::new(heading.as_str())
                     .block(block.clone())
                     .wrap(Wrap { trim: false }),
@@ -631,11 +710,13 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                     width: heading.len() as u16,
                     height: 1,
                 },
+                frame.size().height,
             );
             layout.x + heading.len() as u16
         }
         None => {
-            frame.render_widget(
+            safe_render(
+                frame,
                 Paragraph::new("Output")
                     .block(block.clone())
                     .wrap(Wrap { trim: false }),
@@ -645,13 +726,15 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                     width: "Output".len() as u16,
                     height: 1,
                 },
+                frame.size().height,
             );
             layout.x + "Output".len() as u16
         }
     };
 
     if let Mode::Executing(ref mut direction, ref mut index, _, _) = model.mode {
-        frame.render_widget(
+        safe_render(
+            frame,
             Clear,
             Rect {
                 x: animation_x,
@@ -659,11 +742,13 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                 width: layout.width - (animation_x - layout.x) - 1,
                 height: 1,
             },
+            frame.size().height,
         );
 
         for cell in animation_x..animation_x + layout.width - (animation_x - layout.x) - 1 {
             if cell == animation_x + *index {
-                frame.render_widget(
+                safe_render(
+                    frame,
                     Paragraph::new("-")
                         .block(block.clone())
                         .wrap(Wrap { trim: false }),
@@ -673,9 +758,11 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                         width: 1,
                         height: 1,
                     },
+                    frame.size().height,
                 );
             } else {
-                frame.render_widget(
+                safe_render(
+                    frame,
                     Paragraph::new(" ")
                         .block(block.clone())
                         .wrap(Wrap { trim: false }),
@@ -685,6 +772,7 @@ fn render_output(frame: &mut ratatui::Frame, model: &mut Model, layout: Rect) {
                         width: 1,
                         height: 1,
                     },
+                    frame.size().height,
                 );
             }
         }
@@ -711,7 +799,8 @@ fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rec
         .collect::<Vec<String>>();
 
     for (index, command) in pinned_commands.iter().enumerate() {
-        frame.render_widget(
+        safe_render(
+            frame,
             Paragraph::new(command.as_str())
                 .block(Block::new().white().on_black())
                 .wrap(Wrap { trim: false }),
@@ -721,11 +810,13 @@ fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rec
                 width: layout.width - 2,
                 height: 1,
             },
+            frame.size().height,
         );
     }
 
     if !pinned_commands.is_empty() {
-        frame.render_widget(
+        safe_render(
+            frame,
             ratatui::widgets::Paragraph::new("-".repeat(layout.width as usize - 2))
                 .block(Block::new().white().on_black().bold())
                 .wrap(Wrap { trim: false }),
@@ -735,6 +826,7 @@ fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rec
                 width: layout.width - 2,
                 height: 1,
             },
+            frame.size().height,
         );
     }
 
@@ -748,7 +840,8 @@ fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rec
             .collect::<Vec<String>>()
             .join("\n");
 
-        frame.render_widget(
+        safe_render(
+            frame,
             Paragraph::new(commands)
                 .block(Block::new().white().on_black())
                 .wrap(Wrap { trim: false }),
@@ -764,14 +857,17 @@ fn render_command_history(frame: &mut ratatui::Frame, model: &Model, layout: Rec
                     - pinned_commands.len() as u16
                     - if pinned_commands.is_empty() { 0 } else { 1 },
             },
+            frame.size().height,
         );
     }
 
-    frame.render_widget(
+    safe_render(
+        frame,
         ratatui::widgets::Paragraph::new("History")
             .block(Block::new().white().on_black().bold())
             .wrap(Wrap { trim: false }),
         layout,
+        frame.size().height,
     );
 }
 
@@ -785,7 +881,8 @@ fn render_directory_history(frame: &mut ratatui::Frame, model: &Model, layout: R
         .collect::<Vec<String>>()
         .join("\n");
 
-    frame.render_widget(
+    safe_render(
+        frame,
         Paragraph::new(directories)
             .block(Block::new().white().on_black().bold())
             .wrap(Wrap { trim: false }),
@@ -795,13 +892,16 @@ fn render_directory_history(frame: &mut ratatui::Frame, model: &Model, layout: R
             width: layout.width - 2,
             height: layout.height - 2,
         },
+        frame.size().height,
     );
 
-    frame.render_widget(
+    safe_render(
+        frame,
         ratatui::widgets::Paragraph::new("Directory History")
             .block(Block::new().white().on_black().bold())
             .wrap(Wrap { trim: false }),
         layout,
+        frame.size().height,
     );
 }
 
@@ -852,9 +952,10 @@ fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
 
         let area = centered_rect(40, 50, frame.size());
 
-        frame.render_widget(Clear, area);
+        safe_render(frame, Clear, area, frame.size().height);
 
-        frame.render_widget(
+        safe_render(
+            frame,
             Block::new()
                 .white()
                 .on_black()
@@ -863,6 +964,7 @@ fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
                 .title_alignment(ratatui::layout::Alignment::Center)
                 .title(directory.current_dir.to_string_lossy().to_string()),
             area,
+            frame.size().height,
         );
 
         let layouts = Layout::default()
@@ -870,7 +972,8 @@ fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
             .constraints([Constraint::Min(3), Constraint::Min(0)])
             .split(area);
 
-        frame.render_widget(
+        safe_render(
+            frame,
             Paragraph::new(
                 Line::from(directory.search.as_str()).alignment(ratatui::layout::Alignment::Center),
             )
@@ -881,6 +984,7 @@ fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
                 width: layouts[0].width - 2,
                 height: layouts[0].height,
             },
+            frame.size().height,
         );
 
         let list_location = Rect {
@@ -889,9 +993,11 @@ fn render_directory_view(model: &mut Model, frame: &mut ratatui::Frame) {
             width: layouts[1].width - 2,
             height: layouts[1].height - 4,
         };
-        frame.render_widget(
+        safe_render(
+            frame,
             ratatui::widgets::List::new(items).block(Block::new().white().on_black().bold()),
             list_location,
+            frame.size().height,
         );
         directory.location = Some(list_location);
     }
